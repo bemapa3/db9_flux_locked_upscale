@@ -867,12 +867,26 @@ class DB9FluxLockedControlNetUpscale:
             )
 
         # Structure guide: resize to full output size (will be sliced per tile)
+        # WARNING: structure guide causes ghosting when denoise > 0.55
+        # because model generates new content at different positions than the reference LF.
+        # Auto-disable when denoise is too high.
         structure_full = None
+        _effective_sg_strength = structure_guide_strength
         if structure_guide_image is not None and structure_guide_strength > 0:
-            structure_full = _resize_nchw(
-                _bhwc_to_nchw(structure_guide_image).to(cpu), (out_h, out_w), "bilinear"
-            )
-            print(f"[DB9] Structure guide active (strength={structure_guide_strength:.2f}) — ControlNet-free mode")
+            if denoise > 0.55:
+                _effective_sg_strength = max(0.0, structure_guide_strength * (1.0 - denoise) * 3.0)
+                if _effective_sg_strength < 0.05:
+                    _effective_sg_strength = 0.0
+                if _effective_sg_strength < structure_guide_strength:
+                    print(
+                        f"[DB9] Structure guide: denoise={denoise} > 0.55 causes ghosting. "
+                        f"Auto-scaling strength {structure_guide_strength:.2f} -> {_effective_sg_strength:.2f}"
+                    )
+            if _effective_sg_strength > 0:
+                structure_full = _resize_nchw(
+                    _bhwc_to_nchw(structure_guide_image).to(cpu), (out_h, out_w), "bilinear"
+                )
+                print(f"[DB9] Structure guide active (effective_strength={_effective_sg_strength:.2f})")
 
         # -- Step 2: tile positions --
         y_positions = _make_positions(out_h, tile_height, overlap)
@@ -977,11 +991,11 @@ class DB9FluxLockedControlNetUpscale:
                 if contrast_lock_strength > 0:
                     sampled_nchw = _contrast_lock(sampled_nchw, tile_ref, contrast_lock_strength)
 
-                # Frequency structure lock (works with high denoise too)
-                if structure_full is not None and structure_guide_strength > 0:
+                # Frequency structure lock
+                if structure_full is not None and _effective_sg_strength > 0:
                     tile_struct_nchw = structure_full[:, :, y:y2, x:x2]
                     sampled_nchw = _frequency_structure_lock(
-                        sampled_nchw, tile_struct_nchw, structure_guide_strength
+                        sampled_nchw, tile_struct_nchw, _effective_sg_strength
                     )
 
                 # Blend into canvas
