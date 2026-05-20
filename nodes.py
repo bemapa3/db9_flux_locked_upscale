@@ -862,6 +862,8 @@ class DB9FluxLockedControlNetUpscale:
         wts = torch.zeros((b, 1, out_h, out_w), device=cpu, dtype=torch.float32)
 
         tile_index = 0
+        _cn_disabled = False  # becomes True if ControlNet fails (shape mismatch)
+
         for y in y_positions:
             for x in x_positions:
                 y2 = min(out_h, y + tile_height)
@@ -875,19 +877,46 @@ class DB9FluxLockedControlNetUpscale:
                 tile_image_bhwc = _nchw_to_bhwc(tile_base)    # (B,th,tw,C) CPU
                 tile_ctrl_bhwc = _nchw_to_bhwc(tile_ctrl)
 
+                # Keep a clean copy of conditioning for fallback
+                tile_pos_clean = _clone_conditioning(positive)
+                tile_neg_clean = _clone_conditioning(negative)
+
+                # Apply ControlNet unless already disabled due to earlier error
                 tile_pos = _clone_conditioning(positive)
                 tile_neg = _clone_conditioning(negative)
+                active_cn = None if _cn_disabled else control_net
                 tile_pos, tile_neg = _apply_controlnet(
-                    tile_pos, tile_neg, control_net, tile_ctrl_bhwc,
+                    tile_pos, tile_neg, active_cn, tile_ctrl_bhwc,
                     control_strength, control_start_percent, control_end_percent,
                 )
 
-                sampled_bhwc = _sample_tile(
-                    model, tile_pos, tile_neg, vae,
-                    tile_image_bhwc,
-                    int(seed) + tile_index,
-                    steps, cfg, sampler_name, scheduler, denoise,
-                )
+                try:
+                    sampled_bhwc = _sample_tile(
+                        model, tile_pos, tile_neg, vae,
+                        tile_image_bhwc,
+                        int(seed) + tile_index,
+                        steps, cfg, sampler_name, scheduler, denoise,
+                    )
+                except RuntimeError as e:
+                    err_str = str(e)
+                    if ("cannot be multiplied" in err_str or "mat1" in err_str
+                            or "shape" in err_str.lower()) and not _cn_disabled:
+                        print(
+                            f"[DB9] WARNING: ControlNet shape mismatch — "
+                            f"the connected ControlNet is NOT compatible with this model.\n"
+                            f"[DB9]   Error: {err_str}\n"
+                            f"[DB9]   Disabling ControlNet for all remaining tiles and retrying."
+                        )
+                        _cn_disabled = True
+                        # Retry this tile without ControlNet
+                        sampled_bhwc = _sample_tile(
+                            model, tile_pos_clean, tile_neg_clean, vae,
+                            tile_image_bhwc,
+                            int(seed) + tile_index,
+                            steps, cfg, sampler_name, scheduler, denoise,
+                        )
+                    else:
+                        raise
 
                 # Critical: force sampled result to CPU canvas device
                 sampled_nchw = _bhwc_to_nchw(sampled_bhwc).to(cpu)
@@ -910,7 +939,8 @@ class DB9FluxLockedControlNetUpscale:
                 tile_index += 1
                 if pbar is not None:
                     pbar.update(1)
-                print(f"[DB9] Tile {tile_index}/{total_tiles}  y={y}:{y2}  x={x}:{x2}  done")
+                cn_tag = " [no CN]" if _cn_disabled else ""
+                print(f"[DB9] Tile {tile_index}/{total_tiles}  y={y}:{y2}  x={x}:{x2}{cn_tag}  done")
 
         # -- Step 4: normalize + global color/contrast correction --
         out = acc / wts.clamp_min(1e-5)
