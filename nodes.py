@@ -251,7 +251,14 @@ def _upscale_with_model(upscale_model, image_bhwc):
     if comfy_nodes is None or upscale_model is None:
         return None
     try:
-        return comfy_nodes.ImageUpscaleWithModel().upscale(upscale_model, image_bhwc)[0]
+        # Try both attribute names (ComfyUI version differences)
+        upscaler_node = getattr(comfy_nodes, 'ImageUpscaleWithModel', None)
+        if upscaler_node is None:
+            import nodes as _nodes_module
+            upscaler_node = getattr(_nodes_module, 'ImageUpscaleWithModel', None)
+        if upscaler_node is None:
+            raise AttributeError("ImageUpscaleWithModel not found")
+        return upscaler_node().upscale(upscale_model, image_bhwc)[0]
     except Exception as e:
         print(f"[DB9] Upscale model error ({e}), falling back to bicubic.")
         return None
@@ -957,8 +964,6 @@ class DB9FluxLockedControlNetUpscale:
                         tile_image_bhwc,
                         int(seed) + tile_index,
                         steps, cfg, sampler_name, scheduler, denoise,
-                        structure_img=tile_structure_bhwc,
-                        structure_strength=structure_guide_strength,
                     )
                 except RuntimeError as e:
                     err_str = str(e)
@@ -977,8 +982,6 @@ class DB9FluxLockedControlNetUpscale:
                             tile_image_bhwc,
                             int(seed) + tile_index,
                             steps, cfg, sampler_name, scheduler, denoise,
-                            structure_img=tile_structure_bhwc,
-                            structure_strength=structure_guide_strength,
                         )
                     else:
                         raise
