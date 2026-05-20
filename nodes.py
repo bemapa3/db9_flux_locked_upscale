@@ -211,16 +211,40 @@ def _apply_controlnet(pos, neg, cn, ctrl_img, strength, start_pct, end_pct):
     return pos, neg
 
 
-def _sample_tile(model, pos, neg, vae, tile_img, seed, steps, cfg, sampler, sched, denoise):
+def _sample_tile(
+    model, pos, neg, vae, tile_img, seed, steps, cfg, sampler, sched, denoise,
+):
     """Encode -> KSample -> Decode a single tile image (BHWC)."""
     if comfy_nodes is None:
         return tile_img
-    latent = comfy_nodes.VAEEncode().encode(vae, tile_img)[0]
+    latent_dict = comfy_nodes.VAEEncode().encode(vae, tile_img)[0]
     sampled = comfy_nodes.KSampler().sample(
-        model, seed, steps, cfg, sampler, sched, pos, neg, latent, denoise
+        model, seed, steps, cfg, sampler, sched, pos, neg, latent_dict, denoise
     )[0]
     return comfy_nodes.VAEDecode().decode(vae, sampled)[0]
 
+
+
+def _frequency_structure_lock(model_output, structure_ref, strength, blur_radius=15):
+    """Post-process frequency separation structure lock.
+
+    Works with ANY denoise level (including denoise=1.0).
+    model_output  = model tile (great HF texture/detail)
+    structure_ref = tile_blur or bicubic base (correct LF structure/layout)
+    Result: reference structure + model texture -- no ControlNet needed.
+    """
+    if strength <= 0:
+        return model_output
+    dev = model_output.device
+    ref = structure_ref.float().to(dev)
+    out = model_output.float()
+    k = max(3, (blur_radius * 2) | 1)
+    pad = k // 2
+    out_lf = F.avg_pool2d(out, k, stride=1, padding=pad)
+    ref_lf = F.avg_pool2d(ref, k, stride=1, padding=pad)
+    out_hf = out - out_lf
+    blended_lf = torch.lerp(out_lf, ref_lf, strength)
+    return (blended_lf + out_hf).clamp(0.0, 1.0)
 
 def _upscale_with_model(upscale_model, image_bhwc):
     """Use ComfyUI ImageUpscaleWithModel. Returns BHWC or None on failure."""
@@ -792,6 +816,9 @@ class DB9FluxLockedControlNetUpscale:
                 "control_strength": ("FLOAT", {"default": 0.65, "min": 0.0, "max": 2.0, "step": 0.01}),
                 "control_start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "control_end_percent": ("FLOAT", {"default": 0.75, "min": 0.0, "max": 1.0, "step": 0.01}),
+                # --- ControlNet-free structure guide (works with any model) ---
+                "structure_guide_image": ("IMAGE",),
+                "structure_guide_strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
             },
         }
 
@@ -809,6 +836,7 @@ class DB9FluxLockedControlNetUpscale:
         upscale_model=None,
         control_net=None, control_image=None,
         control_strength=0.65, control_start_percent=0.0, control_end_percent=0.75,
+        structure_guide_image=None, structure_guide_strength=0.5,
     ):
         src = _bhwc_to_nchw(image)
         b, c, h, w = src.shape
@@ -837,6 +865,14 @@ class DB9FluxLockedControlNetUpscale:
             control_full = _resize_nchw(
                 _bhwc_to_nchw(control_image).to(cpu), (out_h, out_w), "bilinear"
             )
+
+        # Structure guide: resize to full output size (will be sliced per tile)
+        structure_full = None
+        if structure_guide_image is not None and structure_guide_strength > 0:
+            structure_full = _resize_nchw(
+                _bhwc_to_nchw(structure_guide_image).to(cpu), (out_h, out_w), "bilinear"
+            )
+            print(f"[DB9] Structure guide active (strength={structure_guide_strength:.2f}) — ControlNet-free mode")
 
         # -- Step 2: tile positions --
         y_positions = _make_positions(out_h, tile_height, overlap)
@@ -890,12 +926,20 @@ class DB9FluxLockedControlNetUpscale:
                     control_strength, control_start_percent, control_end_percent,
                 )
 
+                # Slice structure guide to this tile (if active)
+                tile_structure_bhwc = None
+                if structure_full is not None:
+                    tile_structure_nchw = structure_full[:, :, y:y2, x:x2]
+                    tile_structure_bhwc = _nchw_to_bhwc(tile_structure_nchw)
+
                 try:
                     sampled_bhwc = _sample_tile(
                         model, tile_pos, tile_neg, vae,
                         tile_image_bhwc,
                         int(seed) + tile_index,
                         steps, cfg, sampler_name, scheduler, denoise,
+                        structure_img=tile_structure_bhwc,
+                        structure_strength=structure_guide_strength,
                     )
                 except RuntimeError as e:
                     err_str = str(e)
@@ -908,12 +952,14 @@ class DB9FluxLockedControlNetUpscale:
                             f"[DB9]   Disabling ControlNet for all remaining tiles and retrying."
                         )
                         _cn_disabled = True
-                        # Retry this tile without ControlNet
+                        # Retry this tile without ControlNet (but keep structure guide)
                         sampled_bhwc = _sample_tile(
                             model, tile_pos_clean, tile_neg_clean, vae,
                             tile_image_bhwc,
                             int(seed) + tile_index,
                             steps, cfg, sampler_name, scheduler, denoise,
+                            structure_img=tile_structure_bhwc,
+                            structure_strength=structure_guide_strength,
                         )
                     else:
                         raise
@@ -925,11 +971,18 @@ class DB9FluxLockedControlNetUpscale:
                 if sampled_nchw.shape[2:] != (th, tw):
                     sampled_nchw = _resize_nchw(sampled_nchw, (th, tw), "bicubic")
 
-                # Per-tile color/contrast lock to base reference
+                # Per-tile post-processing
                 if color_lock_strength > 0:
                     sampled_nchw = _match_color_stats(sampled_nchw, tile_ref, color_lock_strength)
                 if contrast_lock_strength > 0:
                     sampled_nchw = _contrast_lock(sampled_nchw, tile_ref, contrast_lock_strength)
+
+                # Frequency structure lock (works with high denoise too)
+                if structure_full is not None and structure_guide_strength > 0:
+                    tile_struct_nchw = structure_full[:, :, y:y2, x:x2]
+                    sampled_nchw = _frequency_structure_lock(
+                        sampled_nchw, tile_struct_nchw, structure_guide_strength
+                    )
 
                 # Blend into canvas
                 mask = _cosine_mask(th, tw, feather, cpu, torch.float32)
