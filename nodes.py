@@ -873,15 +873,20 @@ class DB9FluxLockedControlNetUpscale:
         structure_full = None
         _effective_sg_strength = structure_guide_strength
         if structure_guide_image is not None and structure_guide_strength > 0:
-            if denoise > 0.55:
-                _effective_sg_strength = max(0.0, structure_guide_strength * (1.0 - denoise) * 3.0)
-                if _effective_sg_strength < 0.05:
-                    _effective_sg_strength = 0.0
-                if _effective_sg_strength < structure_guide_strength:
-                    print(
-                        f"[DB9] Structure guide: denoise={denoise} > 0.55 causes ghosting. "
-                        f"Auto-scaling strength {structure_guide_strength:.2f} -> {_effective_sg_strength:.2f}"
-                    )
+            # Ghost risk increases with denoise (model generates more different content).
+            # Scale structure_guide DOWN as denoise goes up to prevent ghost.
+            # Formula: at denoise=0   -> 100% strength (model changes nothing, no ghost risk)
+            #          at denoise=0.5 -> 50% strength
+            #          at denoise=1.0 -> 0%  strength (model fully rewrites, ghost guaranteed)
+            _effective_sg_strength = structure_guide_strength * max(0.0, 1.0 - denoise)
+            if _effective_sg_strength < 0.02:
+                _effective_sg_strength = 0.0
+            if _effective_sg_strength != structure_guide_strength:
+                print(
+                    f"[DB9] Structure guide: denoise={denoise:.2f} auto-scales "
+                    f"strength {structure_guide_strength:.2f} -> {_effective_sg_strength:.2f} "
+                    f"(higher denoise = higher ghost risk = lower strength)"
+                )
             if _effective_sg_strength > 0:
                 structure_full = _resize_nchw(
                     _bhwc_to_nchw(structure_guide_image).to(cpu), (out_h, out_w), "bilinear"
@@ -995,7 +1000,8 @@ class DB9FluxLockedControlNetUpscale:
                 if structure_full is not None and _effective_sg_strength > 0:
                     tile_struct_nchw = structure_full[:, :, y:y2, x:x2]
                     sampled_nchw = _frequency_structure_lock(
-                        sampled_nchw, tile_struct_nchw, _effective_sg_strength
+                        sampled_nchw, tile_struct_nchw, _effective_sg_strength,
+                        blur_radius=5,  # small blur = only micro-structure, avoids person ghost
                     )
 
                 # Blend into canvas
