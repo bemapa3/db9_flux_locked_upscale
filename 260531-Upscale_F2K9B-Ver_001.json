@@ -1,0 +1,1385 @@
+{
+  "id": "7f1d206d-e288-4f8a-a888-5ebfe293c386",
+  "revision": 0,
+  "last_node_id": 32,
+  "last_link_id": 72,
+  "nodes": [
+    {
+      "id": 4,
+      "type": "SDVN Any Show",
+      "pos": [
+        2957.35602107585,
+        3571.862214441787
+      ],
+      "size": [
+        366.2781818930622,
+        88
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "any",
+          "type": "*",
+          "link": 2
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "sdvn_comfy_node",
+        "ver": "e4c47de102ba8c15f56b16f327b4fd17fe12fa71",
+        "Node name for S&R": "SDVN Any Show",
+        "aux_id": "StableDiffusionVN/SDVN_Comfy_node",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 5,
+      "type": "SDVN Any Show",
+      "pos": [
+        2955.6962394498405,
+        3714.5927454963826
+      ],
+      "size": [
+        362.9949276481268,
+        88
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "any",
+          "type": "*",
+          "link": 3
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "sdvn_comfy_node",
+        "ver": "e4c47de102ba8c15f56b16f327b4fd17fe12fa71",
+        "Node name for S&R": "SDVN Any Show",
+        "aux_id": "StableDiffusionVN/SDVN_Comfy_node",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 9,
+      "type": "SDVN CLIP Text Encode Simple",
+      "pos": [
+        3642.9226812201923,
+        3580.941292689236
+      ],
+      "size": [
+        392.1669411886776,
+        228
+      ],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 71
+        }
+      ],
+      "outputs": [
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "links": [
+            53,
+            54
+          ]
+        },
+        {
+          "name": "prompt",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "cnr_id": "sdvn_comfy_node",
+        "ver": "e6e818f39b49684a362d096fb8eaca50405bd7d2",
+        "Node name for S&R": "SDVN CLIP Text Encode Simple",
+        "aux_id": "StableDiffusionVN/SDVN_Comfy_node",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.5.2"
+        }
+      },
+      "widgets_values": [
+        "increase image details,upscale_mir,BBB_Upscale_Ver004\n,keep original color, no color driff,",
+        "None",
+        "None",
+        199556481271438,
+        "fixed",
+        null
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 7,
+      "type": "SDVN Load Checkpoint",
+      "pos": [
+        3346.883947533336,
+        3560.2218309159393
+      ],
+      "size": [
+        270,
+        190
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            7
+          ]
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "links": [
+            8
+          ]
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "links": [
+            42
+          ]
+        },
+        {
+          "name": "ckpt_path",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "cnr_id": "sdvn_comfy_node",
+        "ver": "171eb3fc033e7c1bc71acfff4d13b009a9827618",
+        "Node name for S&R": "SDVN Load Checkpoint",
+        "aux_id": "StableDiffusionVN/SDVN_Comfy_node",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.5.2"
+        }
+      },
+      "widgets_values": [
+        true,
+        "",
+        "model.safetensors",
+        "Flux2-klein-9b.safetensors"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 26,
+      "type": "SDVN AnyDownload List",
+      "pos": [
+        4113.08440980846,
+        3021.5922497802003
+      ],
+      "size": [
+        270,
+        58
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "any_model",
+          "type": "*",
+          "links": [
+            55
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "sdvn_comfy_node",
+        "ver": "a0e8df61e5786d47d30853de08b5ab37cc72dae4",
+        "Node name for S&R": "SDVN AnyDownload List",
+        "aux_id": "StableDiffusionVN/SDVN_Comfy_node",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "4x-UltraSharp.ckpt"
+      ]
+    },
+    {
+      "id": 23,
+      "type": "DB9TileMerge",
+      "pos": [
+        4810.907700838134,
+        3155.9205089172146
+      ],
+      "size": [
+        465.3138166873741,
+        126.33388237735562
+      ],
+      "flags": {},
+      "order": 17,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "tiles",
+          "type": "IMAGE",
+          "link": 43
+        },
+        {
+          "name": "tile_layout",
+          "type": "TILE_LAYOUT",
+          "link": 34
+        },
+        {
+          "name": "reference_image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 58
+        },
+        {
+          "name": "feather",
+          "type": "INT",
+          "widget": {
+            "name": "feather"
+          },
+          "link": 50
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "links": [
+            51
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "bemapa3/db9_flux_locked_upscale",
+        "ver": "94589052de5cea3dc51d167a709d75c73ca3b1ed",
+        "Node name for S&R": "DB9TileMerge",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        128,
+        0.5
+      ]
+    },
+    {
+      "id": 13,
+      "type": "SDVN Simple Any Input",
+      "pos": [
+        4070.093203649338,
+        3749.2304448832224
+      ],
+      "size": [
+        270,
+        58
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "any",
+          "shape": 6,
+          "type": "*",
+          "links": [
+            49,
+            50
+          ]
+        }
+      ],
+      "title": "Feather 48-64",
+      "properties": {
+        "cnr_id": "sdvn_comfy_node",
+        "ver": "090cde3cd229a59b9c53550ab71dc3a76ff4d143",
+        "Node name for S&R": "SDVN Simple Any Input",
+        "aux_id": "StableDiffusionVN/SDVN_Comfy_node",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.7"
+        }
+      },
+      "widgets_values": [
+        "24"
+      ]
+    },
+    {
+      "id": 17,
+      "type": "SDVN Simple Any Input",
+      "pos": [
+        4065.9832262954874,
+        3651.809248177714
+      ],
+      "size": [
+        270,
+        58
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "any",
+          "shape": 6,
+          "type": "*",
+          "links": [
+            17,
+            48
+          ]
+        }
+      ],
+      "title": "Over lap 64-96",
+      "properties": {
+        "cnr_id": "sdvn_comfy_node",
+        "ver": "090cde3cd229a59b9c53550ab71dc3a76ff4d143",
+        "Node name for S&R": "SDVN Simple Any Input",
+        "aux_id": "StableDiffusionVN/SDVN_Comfy_node",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.7"
+        }
+      },
+      "widgets_values": [
+        "32"
+      ]
+    },
+    {
+      "id": 15,
+      "type": "DB9TileSplit",
+      "pos": [
+        3772.9846122349823,
+        3367.631924457258
+      ],
+      "size": [
+        270,
+        126
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 66
+        },
+        {
+          "name": "tile_width",
+          "type": "INT",
+          "widget": {
+            "name": "tile_width"
+          },
+          "link": 15
+        },
+        {
+          "name": "tile_height",
+          "type": "INT",
+          "widget": {
+            "name": "tile_height"
+          },
+          "link": 16
+        },
+        {
+          "name": "overlap",
+          "type": "INT",
+          "widget": {
+            "name": "overlap"
+          },
+          "link": 17
+        }
+      ],
+      "outputs": [
+        {
+          "name": "tiles",
+          "type": "IMAGE",
+          "links": [
+            44
+          ]
+        },
+        {
+          "name": "tile_layout",
+          "type": "TILE_LAYOUT",
+          "links": [
+            34
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "bemapa3/db9_flux_locked_upscale",
+        "ver": "94589052de5cea3dc51d167a709d75c73ca3b1ed",
+        "Node name for S&R": "DB9TileSplit",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        1536,
+        1536,
+        192
+      ]
+    },
+    {
+      "id": 2,
+      "type": "GetImageSize",
+      "pos": [
+        2759.51461564044,
+        3390.434577068782
+      ],
+      "size": [
+        155.4072265625,
+        124
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 56
+        }
+      ],
+      "outputs": [
+        {
+          "name": "width",
+          "type": "INT",
+          "links": [
+            2
+          ]
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "links": [
+            3
+          ]
+        },
+        {
+          "name": "batch_size",
+          "type": "INT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.19.3",
+        "Node name for S&R": "GetImageSize",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 8,
+      "type": "SDVN Load Lora",
+      "pos": [
+        3118.310612092983,
+        3905.037924464925
+      ],
+      "size": [
+        270,
+        218
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "shape": 7,
+          "type": "MODEL",
+          "link": 7
+        },
+        {
+          "name": "clip",
+          "shape": 7,
+          "type": "CLIP",
+          "link": 8
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            69
+          ]
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "links": [
+            70
+          ]
+        },
+        {
+          "name": "lora_path",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "sdvn_comfy_node",
+        "ver": "bade2fa613cb1f36bba5c7285b82b50fcb6df45f",
+        "Node name for S&R": "SDVN Load Lora",
+        "aux_id": "StableDiffusionVN/SDVN_Comfy_node",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        true,
+        "",
+        "model.safetensors",
+        "Lora/Lora_DB_upscale_mir/Lora_DB_upscale_mir.safetensors",
+        0.8,
+        0
+      ]
+    },
+    {
+      "id": 1,
+      "type": "SDVN Load Image",
+      "pos": [
+        2996.365561085582,
+        2921.6104752793576
+      ],
+      "size": [
+        270,
+        382.00000000000006
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "links": [
+            52,
+            56,
+            58,
+            64
+          ]
+        },
+        {
+          "name": "mask",
+          "type": "MASK",
+          "links": []
+        },
+        {
+          "name": "img_path",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "sdvn_comfy_node",
+        "ver": "14615456e595dd15de243ad23693115c483f466b",
+        "Node name for S&R": "SDVN Load Image",
+        "aux_id": "StableDiffusionVN/SDVN_Comfy_node",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.7"
+        },
+        "image": "clipspace/clipspace-painted-masked-1773468325698.png [input]"
+      },
+      "widgets_values": [
+        false,
+        "https://www.pinterest.com/pin/764345368045816960/",
+        "2026_Cam_Circle_Conner (1).jpg",
+        "image"
+      ],
+      "color": "#223",
+      "bgcolor": "#335"
+    },
+    {
+      "id": 16,
+      "type": "SDVN Simple Any Input",
+      "pos": [
+        4071.5918757282448,
+        3554.980677782069
+      ],
+      "size": [
+        270,
+        58
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "any",
+          "shape": 6,
+          "type": "*",
+          "links": [
+            15,
+            16,
+            46,
+            47
+          ]
+        }
+      ],
+      "title": "Tile 1536 - 2048",
+      "properties": {
+        "cnr_id": "sdvn_comfy_node",
+        "ver": "090cde3cd229a59b9c53550ab71dc3a76ff4d143",
+        "Node name for S&R": "SDVN Simple Any Input",
+        "aux_id": "StableDiffusionVN/SDVN_Comfy_node",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.7"
+        }
+      },
+      "widgets_values": [
+        "2048"
+      ]
+    },
+    {
+      "id": 32,
+      "type": "SDVN Load Lora",
+      "pos": [
+        3407.6460005634317,
+        3903.196068117374
+      ],
+      "size": [
+        270,
+        430
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "shape": 7,
+          "type": "MODEL",
+          "link": 69
+        },
+        {
+          "name": "clip",
+          "shape": 7,
+          "type": "CLIP",
+          "link": 70
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            72
+          ]
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "links": [
+            71
+          ]
+        },
+        {
+          "name": "lora_path",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "sdvn_comfy_node",
+        "ver": "bade2fa613cb1f36bba5c7285b82b50fcb6df45f",
+        "Node name for S&R": "SDVN Load Lora",
+        "aux_id": "StableDiffusionVN/SDVN_Comfy_node",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        true,
+        "",
+        "model.safetensors",
+        "Lora/epi_noiseoffset2.pt",
+        0.8,
+        0
+      ]
+    },
+    {
+      "id": 31,
+      "type": "SDVN Upscale Image",
+      "pos": [
+        3370.344496982426,
+        3324.2721568303577
+      ],
+      "size": [
+        270,
+        154
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 64
+        },
+        {
+          "name": "width",
+          "type": "INT",
+          "widget": {
+            "name": "width"
+          },
+          "link": 67
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "widget": {
+            "name": "height"
+          },
+          "link": 68
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            65,
+            66
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "sdvn_comfy_node",
+        "ver": "013bde11a30315175499715d3a72c47a367312fc",
+        "Node name for S&R": "SDVN Upscale Image",
+        "aux_id": "StableDiffusionVN/SDVN_Comfy_node",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.5.2"
+        }
+      },
+      "widgets_values": [
+        "Maxsize",
+        "4x-UltraSharp.ckpt",
+        1.8,
+        4096,
+        3968
+      ]
+    },
+    {
+      "id": 24,
+      "type": "DB9FluxLockedControlNetUpscale",
+      "pos": [
+        4395.569227735403,
+        3166.7462289389264
+      ],
+      "size": [
+        392.95487982465,
+        862
+      ],
+      "flags": {},
+      "order": 16,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 44
+        },
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 72
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 42
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 53
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 54
+        },
+        {
+          "name": "upscale_model",
+          "shape": 7,
+          "type": "UPSCALE_MODEL",
+          "link": 55
+        },
+        {
+          "name": "control_net",
+          "shape": 7,
+          "type": "CONTROL_NET",
+          "link": null
+        },
+        {
+          "name": "control_image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 38
+        },
+        {
+          "name": "structure_guide_image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "tile_width",
+          "type": "INT",
+          "widget": {
+            "name": "tile_width"
+          },
+          "link": 46
+        },
+        {
+          "name": "tile_height",
+          "type": "INT",
+          "widget": {
+            "name": "tile_height"
+          },
+          "link": 47
+        },
+        {
+          "name": "overlap",
+          "type": "INT",
+          "widget": {
+            "name": "overlap"
+          },
+          "link": 48
+        },
+        {
+          "name": "feather",
+          "type": "INT",
+          "widget": {
+            "name": "feather"
+          },
+          "link": 49
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "links": [
+            43
+          ]
+        },
+        {
+          "name": "base_reference",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "aux_id": "bemapa3/db9_flux_locked_upscale",
+        "ver": "94589052de5cea3dc51d167a709d75c73ca3b1ed",
+        "Node name for S&R": "DB9FluxLockedControlNetUpscale",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        2,
+        1536,
+        1536,
+        192,
+        128,
+        902996607627929,
+        "randomize",
+        4,
+        8,
+        "euler",
+        "simple",
+        0.3,
+        "bilinear",
+        0.55,
+        0.2,
+        0.65,
+        0,
+        0.75,
+        0
+      ]
+    },
+    {
+      "id": 14,
+      "type": "DB9GlobalControlGuide",
+      "pos": [
+        3741.412384974864,
+        3186.8561164018183
+      ],
+      "size": [
+        291.6144165039062,
+        130
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 65
+        }
+      ],
+      "outputs": [
+        {
+          "name": "control_image",
+          "type": "IMAGE",
+          "links": [
+            38
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "bemapa3/db9_flux_locked_upscale",
+        "ver": "94589052de5cea3dc51d167a709d75c73ca3b1ed",
+        "Node name for S&R": "DB9GlobalControlGuide",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "tile_blur",
+        1472,
+        0,
+        false
+      ]
+    },
+    {
+      "id": 3,
+      "type": "SDVN Simple Any Input",
+      "pos": [
+        2951.161347442473,
+        3367.427075232323
+      ],
+      "size": [
+        377.7147391514152,
+        146.80302191486862
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "any",
+          "shape": 6,
+          "type": "*",
+          "links": [
+            67,
+            68
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "sdvn_comfy_node",
+        "ver": "090cde3cd229a59b9c53550ab71dc3a76ff4d143",
+        "Node name for S&R": "SDVN Simple Any Input",
+        "aux_id": "StableDiffusionVN/SDVN_Comfy_node",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.7"
+        }
+      },
+      "widgets_values": [
+        "6000"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 25,
+      "type": "SDVN Save Image",
+      "pos": [
+        4815.20450258127,
+        3331.9014887124067
+      ],
+      "size": [
+        468.6077735301327,
+        488.612295405494
+      ],
+      "flags": {},
+      "order": 18,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 51
+        },
+        {
+          "name": "compare_image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 52
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "sdvn_comfy_node",
+        "ver": "a0e8df61e5786d47d30853de08b5ab37cc72dae4",
+        "Node name for S&R": "SDVN Save Image",
+        "aux_id": "StableDiffusionVN/SDVN_Comfy_node",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "BBB-UpscaleF2K9B_"
+      ]
+    }
+  ],
+  "links": [
+    [
+      2,
+      2,
+      0,
+      4,
+      0,
+      "INT"
+    ],
+    [
+      3,
+      2,
+      1,
+      5,
+      0,
+      "INT"
+    ],
+    [
+      7,
+      7,
+      0,
+      8,
+      0,
+      "MODEL"
+    ],
+    [
+      8,
+      7,
+      1,
+      8,
+      1,
+      "CLIP"
+    ],
+    [
+      15,
+      16,
+      0,
+      15,
+      1,
+      "INT"
+    ],
+    [
+      16,
+      16,
+      0,
+      15,
+      2,
+      "INT"
+    ],
+    [
+      17,
+      17,
+      0,
+      15,
+      3,
+      "INT"
+    ],
+    [
+      34,
+      15,
+      1,
+      23,
+      1,
+      "TILE_LAYOUT"
+    ],
+    [
+      38,
+      14,
+      0,
+      24,
+      7,
+      "IMAGE"
+    ],
+    [
+      42,
+      7,
+      2,
+      24,
+      2,
+      "VAE"
+    ],
+    [
+      43,
+      24,
+      0,
+      23,
+      0,
+      "IMAGE"
+    ],
+    [
+      44,
+      15,
+      0,
+      24,
+      0,
+      "IMAGE"
+    ],
+    [
+      46,
+      16,
+      0,
+      24,
+      9,
+      "INT"
+    ],
+    [
+      47,
+      16,
+      0,
+      24,
+      10,
+      "INT"
+    ],
+    [
+      48,
+      17,
+      0,
+      24,
+      11,
+      "INT"
+    ],
+    [
+      49,
+      13,
+      0,
+      24,
+      12,
+      "INT"
+    ],
+    [
+      50,
+      13,
+      0,
+      23,
+      3,
+      "INT"
+    ],
+    [
+      51,
+      23,
+      0,
+      25,
+      0,
+      "IMAGE"
+    ],
+    [
+      52,
+      1,
+      0,
+      25,
+      1,
+      "IMAGE"
+    ],
+    [
+      53,
+      9,
+      0,
+      24,
+      3,
+      "CONDITIONING"
+    ],
+    [
+      54,
+      9,
+      0,
+      24,
+      4,
+      "CONDITIONING"
+    ],
+    [
+      55,
+      26,
+      0,
+      24,
+      5,
+      "UPSCALE_MODEL"
+    ],
+    [
+      56,
+      1,
+      0,
+      2,
+      0,
+      "IMAGE"
+    ],
+    [
+      58,
+      1,
+      0,
+      23,
+      2,
+      "IMAGE"
+    ],
+    [
+      64,
+      1,
+      0,
+      31,
+      0,
+      "IMAGE"
+    ],
+    [
+      65,
+      31,
+      0,
+      14,
+      0,
+      "IMAGE"
+    ],
+    [
+      66,
+      31,
+      0,
+      15,
+      0,
+      "IMAGE"
+    ],
+    [
+      67,
+      3,
+      0,
+      31,
+      1,
+      "INT"
+    ],
+    [
+      68,
+      3,
+      0,
+      31,
+      2,
+      "INT"
+    ],
+    [
+      69,
+      8,
+      0,
+      32,
+      0,
+      "MODEL"
+    ],
+    [
+      70,
+      8,
+      1,
+      32,
+      1,
+      "CLIP"
+    ],
+    [
+      71,
+      32,
+      1,
+      9,
+      0,
+      "CLIP"
+    ],
+    [
+      72,
+      32,
+      0,
+      24,
+      1,
+      "MODEL"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "workflowRendererVersion": "LG",
+    "ue_links": [],
+    "ds": {
+      "scale": 0.839054528882405,
+      "offset": [
+        -2269.364496432378,
+        -2912.0544243352824
+      ]
+    },
+    "links_added_by_ue": [],
+    "frontendVersion": "1.39.19"
+  },
+  "version": 0.4
+}

@@ -1,12 +1,14 @@
 """
 db9_flux_locked_upscale / nodes.py
-Rewrite v2 — 2026-05-20
+Rewrite v3 — 2026-06-01
 
-Fixes:
-  - Device sync bug (CPU/CUDA mismatch causing tile corruption)
-  - Canvas kept on CPU to avoid VRAM OOM on large outputs
-  - Progress bar via comfy.utils.ProgressBar
-  - Per-tile print so user can see progress in console
+v3 Fixes (detail blur on small structures):
+   - Removed destructive double color/contrast lock (was applied per-tile AND global)
+   - Added detail-preserving color lock: extracts HF detail before correction, re-adds after
+   - Added unsharp mask post-merge for sharpness recovery
+   - Canvas kept on CPU to avoid VRAM OOM on large outputs
+   - Progress bar via comfy.utils.ProgressBar
+   - Per-tile print so user can see progress in console
 
 New nodes:
   - DB9MiDaSDepth          — real depth via MiDaS (torch.hub)
@@ -245,6 +247,59 @@ def _frequency_structure_lock(model_output, structure_ref, strength, blur_radius
     out_hf = out - out_lf
     blended_lf = torch.lerp(out_lf, ref_lf, strength)
     return (blended_lf + out_hf).clamp(0.0, 1.0)
+
+def _unsharp_mask(image: torch.Tensor, strength: float = 0.5, radius: int = 3) -> torch.Tensor:
+    """Unsharp mask sharpening in NCHW format.
+    
+    - Input/Output: NCHW tensor, float32
+    - Tách HF = image - blur(image)
+    - Result = image + HF * strength
+    - Clamp [0, 1]
+    - Kernel size = radius * 2 + 1, đảm bảo odd
+    - Dùng F.avg_pool2d cho blur (không cần gaussian)
+    - Return image unchanged nếu strength <= 0
+    """
+    if strength <= 0:
+        return image
+    k = max(3, (radius * 2) | 1)
+    pad = k // 2
+    blurred = F.avg_pool2d(image, k, stride=1, padding=pad)
+    hf = image - blurred
+    return (image + hf * strength).clamp(0.0, 1.0)
+
+def _detail_preserving_color_lock(
+    source: torch.Tensor, reference: torch.Tensor,
+    color_strength: float, contrast_strength: float,
+    blur_radius: int = 7,
+) -> torch.Tensor:
+    """Color/contrast correction that preserves high-frequency detail.
+    
+    ALGORITHM:
+    1. src_lf = avg_pool(source, kernel)      # low-frequency
+    2. src_hf = source - src_lf               # high-frequency (edges, texture)
+    3. ref_lf = avg_pool(reference, kernel)    # reference low-frequency
+    4. corrected_lf = _match_color_stats(src_lf, ref_lf, color_strength)
+    5. corrected_lf = _contrast_lock(corrected_lf, ref_lf, contrast_strength)
+    6. return (corrected_lf + src_hf).clamp(0, 1)
+    
+    KEY INSIGHT: Color correction CHỈ áp dụng lên LF component.
+    HF detail (edges, texture, micro-contrast) được giữ nguyên 100%.
+    """
+    if color_strength <= 0 and contrast_strength <= 0:
+        return source
+    k = max(3, (blur_radius * 2) | 1)
+    pad = k // 2
+    src_lf = F.avg_pool2d(source, k, stride=1, padding=pad)
+    src_hf = source - src_lf
+    ref_lf = F.avg_pool2d(reference.float().to(source.device), k, stride=1, padding=pad)
+    
+    corrected_lf = src_lf
+    if color_strength > 0:
+        corrected_lf = _match_color_stats(corrected_lf, ref_lf, color_strength)
+    if contrast_strength > 0:
+        corrected_lf = _contrast_lock(corrected_lf, ref_lf, contrast_strength)
+        
+    return (corrected_lf + src_hf).clamp(0.0, 1.0)
 
 def _upscale_with_model(upscale_model, image_bhwc):
     """Use ComfyUI ImageUpscaleWithModel. Returns BHWC or None on failure."""
@@ -815,6 +870,7 @@ class DB9FluxLockedControlNetUpscale:
                 "base_upscale_method": (["bicubic", "bilinear", "lanczos"],),
                 "color_lock_strength": ("FLOAT", {"default": 0.55, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "contrast_lock_strength": ("FLOAT", {"default": 0.20, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "sharpen_strength": ("FLOAT", {"default": 0.4, "min": 0.0, "max": 1.5, "step": 0.05}),
             },
             "optional": {
                 "upscale_model": ("UPSCALE_MODEL",),
@@ -839,7 +895,7 @@ class DB9FluxLockedControlNetUpscale:
         image, model, vae, positive, negative,
         scale, tile_width, tile_height, overlap, feather,
         seed, steps, cfg, sampler_name, scheduler, denoise,
-        base_upscale_method, color_lock_strength, contrast_lock_strength,
+        base_upscale_method, color_lock_strength, contrast_lock_strength, sharpen_strength=0.4,
         upscale_model=None,
         control_net=None, control_image=None,
         control_strength=0.65, control_start_percent=0.0, control_end_percent=0.75,
@@ -993,11 +1049,13 @@ class DB9FluxLockedControlNetUpscale:
                 if sampled_nchw.shape[2:] != (th, tw):
                     sampled_nchw = _resize_nchw(sampled_nchw, (th, tw), "bicubic")
 
-                # Per-tile post-processing
-                if color_lock_strength > 0:
-                    sampled_nchw = _match_color_stats(sampled_nchw, tile_ref, color_lock_strength)
-                if contrast_lock_strength > 0:
-                    sampled_nchw = _contrast_lock(sampled_nchw, tile_ref, contrast_lock_strength)
+                # Per-tile post-processing (detail-preserving: only corrects LF, keeps HF intact)
+                if color_lock_strength > 0 or contrast_lock_strength > 0:
+                    sampled_nchw = _detail_preserving_color_lock(
+                        sampled_nchw, tile_ref,
+                        color_lock_strength, contrast_lock_strength,
+                        blur_radius=7,
+                    )
 
                 # Frequency structure lock
                 if structure_full is not None and _effective_sg_strength > 0:
@@ -1018,13 +1076,13 @@ class DB9FluxLockedControlNetUpscale:
                 cn_tag = " [no CN]" if _cn_disabled else ""
                 print(f"[DB9] Tile {tile_index}/{total_tiles}  y={y}:{y2}  x={x}:{x2}{cn_tag}  done")
 
-        # -- Step 4: normalize + global color/contrast correction --
+        # -- Step 4: normalize + final sharpening (NO double color/contrast lock) --
         out = acc / wts.clamp_min(1e-5)
 
-        if color_lock_strength > 0:
-            out = _match_color_stats(out, base_cpu, color_lock_strength * 0.75)
-        if contrast_lock_strength > 0:
-            out = _contrast_lock(out, base_cpu, contrast_lock_strength * 0.75)
+        # Unsharp mask to recover detail lost during cosine-blend averaging
+        if sharpen_strength > 0:
+            out = _unsharp_mask(out, strength=sharpen_strength, radius=3)
+            print(f"[DB9] Applied unsharp mask (strength={sharpen_strength:.2f})")
 
         print("[DB9] Upscale complete.")
         return (_nchw_to_bhwc(out), _nchw_to_bhwc(base_cpu))
