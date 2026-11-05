@@ -326,9 +326,6 @@ def _vegetation_mask_v2(img, threshold=0.05, blur=8, include_flowers=False):
     sm = F.avg_pool2d(m, 4, 4, ceil_mode=True)
     sm = F.max_pool2d(sm, 7, 1, 3)                    # dilate 12 px
     sm = -F.max_pool2d(-sm, 5, 1, 2)                  # erode 8 px  (closing + ~4 px growth)
-    # v4.4c: grow the mask ~24 px into the surroundings (sky etc.) so thin leaves at the canopy
-    # edge come from ONE pass only; the blend band then falls on smooth sky -> no ghost leaves
-    sm = F.max_pool2d(sm, 13, 1, 6)
     sm = _box(sm, 1)
     m = F.interpolate(sm, size=(H, W), mode="bilinear", align_corners=False)
     m = ((m - 0.35) / 0.30).clamp(0, 1)
@@ -489,16 +486,21 @@ def _db9_tiles_v43(base_cpu, model, vae, positive, negative, positive_veg,
             if texture_limit and texture_limit > 0:
                 sn = _texture_limit(sn, ref, texture_limit)
             vtag = ""
+            sn_main = sn
             if vegs[k] is not None:
                 vn, vm = vegs[k]
                 if vn.shape[2:] != (th, tw):
                     vn = _resize_nchw(vn, (th, tw), "bicubic")
+                # v4.4d: match the low frequencies (~24 px: sky tone, shading) of the vegetation pass
+                # to the main pass so the mask transition shows no bright/dark halo ("ghost")
+                vn = vn + _box(_box(sn_main - vn, 12), 12)
                 sn = sn * (1.0 - vm) + vn * vm
                 vtag = f" veg={float(vm.mean()) * 100:.0f}%"
             if blurs[k] is not None:
                 bn, bm = blurs[k]
                 if bn.shape[2:] != (th, tw):
                     bn = _resize_nchw(bn, (th, tw), "bicubic")
+                bn = bn + _box(_box(sn_main - bn, 12), 12)
                 sn = sn * (1.0 - bm) + bn * bm
                 vtag += f" soft={float(bm.mean()) * 100:.0f}%"
             if color_lock_strength > 0 or contrast_lock_strength > 0:
