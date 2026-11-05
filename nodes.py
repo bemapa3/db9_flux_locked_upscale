@@ -1612,8 +1612,44 @@ def _soft_blur(x, radius):
     return F.avg_pool2d(x, k, stride=1, padding=k // 2, count_include_pad=False)
 
 
+def _tone_color_match(lab, ref_lab, strength=1.0, bands=12, max_pixels=400000):
+    """Match mean a/b per lightness band of `lab` to `ref_lab` (both (1,3,H,W) Lab). Returns Lab."""
+    if strength <= 0:
+        return lab
+
+    def stats(t):
+        L = t[0, 0].flatten()
+        ab = t[0, 1:3].reshape(2, -1)
+        step = max(1, L.numel() // max_pixels)
+        L, ab = L[::step], ab[:, ::step]
+        centers = torch.linspace(0.0, 100.0, bands)
+        width = 100.0 / (bands - 1)
+        w = (1.0 - (L[None, :] - centers[:, None]).abs() / width).clamp(min=0.0)   # (bands, N)
+        n = w.sum(1)
+        mean = (w[:, None, :] * ab[None]).sum(2) / n.clamp(min=1e-6)[:, None]   # (bands, 2)
+        return mean, n
+
+    m_src, n_src = stats(lab)
+    m_ref, n_ref = stats(ref_lab)
+    valid = ((n_src > 200) & (n_ref > 200)).float()[:, None]
+    off = (m_ref - m_src) * valid                                                   # (bands, 2)
+    # smooth the per-band offsets so the correction curve is gentle
+    off = F.avg_pool1d(off.t()[None], 3, 1, 1, count_include_pad=False)[0].t()
+    centers = torch.linspace(0.0, 100.0, bands)
+    width = 100.0 / (bands - 1)
+    L = lab[0, 0]
+    w = (1.0 - (L[None] - centers[:, None, None]).abs() / width).clamp(min=0.0)    # (bands, H, W)
+    w = w / w.sum(0, keepdim=True).clamp(min=1e-6)
+    corr = torch.einsum("khw,kc->chw", w, off)                                      # (2, H, W)
+    out = lab.clone()
+    out[0, 1:3] = lab[0, 1:3] + strength * corr
+    print("[DB9] tone colour match a/b offsets (shadows->highlights): "
+          + " ".join(f"{float(a):+.1f}/{float(b):+.1f}" for a, b in off[::3]))
+    return out
+
+
 def _exact_color_restore(src, ref, luma_radius=32, chroma_radius=24, luma_strength=1.0, chroma_strength=1.0,
-                         edge_aware=True):
+                         edge_aware=True, tone_match=1.0):
     """v4.3: correct only LOW-frequency luminance/chroma towards ref. The correction field is
     guided-filtered with the new image's luminance so it follows the NEW edges -> no halos/ghosts."""
     ls = _srgb_to_lab(src)
@@ -1630,7 +1666,10 @@ def _exact_color_restore(src, ref, luma_radius=32, chroma_radius=24, luma_streng
         if edge_aware:
             dab = _guided_filter(guide, dab, max(4, chroma_radius // 2), 1e-3)
         ab = ab + chroma_strength * dab
-    return _lab_to_srgb(torch.cat([L, ab], 1))
+    out = torch.cat([L, ab], 1)
+    if tone_match and tone_match > 0:
+        out = _tone_color_match(out, lr, tone_match)
+    return _lab_to_srgb(out)
 
 
 class DB9ExactColorRestore:
@@ -1651,6 +1690,7 @@ class DB9ExactColorRestore:
                 "luma_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "chroma_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "edge_aware": ("BOOLEAN", {"default": True}),
+                "tone_match": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05}),
             }
         }
 
@@ -1660,7 +1700,7 @@ class DB9ExactColorRestore:
     CATEGORY = "DB9/Flux Locked Upscale"
 
     def restore(self, image, reference, luma_radius, chroma_radius, luma_strength, chroma_strength,
-                edge_aware=True):
+                edge_aware=True, tone_match=1.0):
         src = _bhwc_to_nchw(image).cpu()
         ref = _bhwc_to_nchw(reference).cpu()
         if ref.shape[0] != src.shape[0]:
@@ -1671,7 +1711,7 @@ class DB9ExactColorRestore:
         for i in range(src.shape[0]):
             outs.append(_exact_color_restore(
                 src[i:i + 1], ref[i:i + 1], luma_radius, chroma_radius, luma_strength, chroma_strength,
-                edge_aware))
+                edge_aware, tone_match))
         print(f"[DB9] Exact color restore: luma_r={luma_radius} chroma_r={chroma_radius} "
               f"strength=({luma_strength:.2f},{chroma_strength:.2f})")
         return (_nchw_to_bhwc(torch.cat(outs, 0)),)
