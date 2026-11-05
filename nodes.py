@@ -296,7 +296,7 @@ def _guided_filter(I, p, r, eps):
     return _box(a, r) * I + _box(b, r)
 
 
-def _vegetation_mask_v2(img, threshold=0.05, blur=8, include_flowers=False):
+def _vegetation_mask_v2(img, threshold=0.05, blur=8, include_flowers=False, grow_sky=True):
     """Vegetation mask v2 (B,1,H,W): shadow-aware green, optional flowers, hole filling, steep edge."""
     r, g, b = img[:, 0:1], img[:, 1:2], img[:, 2:3]
     ssum = (r + g + b).clamp_min(1e-4)
@@ -326,6 +326,14 @@ def _vegetation_mask_v2(img, threshold=0.05, blur=8, include_flowers=False):
     sm = F.avg_pool2d(m, 4, 4, ceil_mode=True)
     sm = F.max_pool2d(sm, 7, 1, 3)                    # dilate 12 px
     sm = -F.max_pool2d(-sm, 5, 1, 2)                  # erode 8 px  (closing + ~4 px growth)
+    if grow_sky:
+        # v4.4e: grow ~28 px into SKY only (bright, blue, flat) so thin leaves at the canopy edge come
+        # from one pass -> no translucent "ghost" leaves; walls/roofs are never grown into
+        mu = _box(lum, 3)
+        sd = (_box(lum * lum, 3) - mu * mu).clamp_min(0).sqrt()
+        sky = ((lum - 0.55) / 0.10).clamp(0, 1) * (((b - r) - 0.04) / 0.06).clamp(0, 1) * ((0.03 - sd) / 0.02).clamp(0, 1)
+        sky4 = F.avg_pool2d(sky, 4, 4, ceil_mode=True)
+        sm = torch.max(sm, F.max_pool2d(sm, 15, 1, 7) * sky4)
     sm = _box(sm, 1)
     m = F.interpolate(sm, size=(H, W), mode="bilinear", align_corners=False)
     m = ((m - 0.35) / 0.30).clamp(0, 1)
@@ -400,7 +408,7 @@ def _db9_tiles_v43(base_cpu, model, vae, positive, negative, positive_veg,
     t0 = _time.time()
     blur_full = None
     if veg_denoise > 0 and veg_blur_boost > 0:
-        _vm_full = _vegetation_mask_v2(base_cpu, veg_mask_threshold, veg_mask_blur, veg_include_flowers)
+        _vm_full = _vegetation_mask_v2(base_cpu, veg_mask_threshold, veg_mask_blur, veg_include_flowers, grow_sky=False)
         blur_full = _blurry_veg_mask(base_cpu, _vm_full, veg_blur_fraction)
         print(f"[DB9] v4.4 blurry vegetation: {float(blur_full.mean()) * 100:.1f}% of image -> "
               f"denoise {veg_denoise:.2f}+{veg_blur_boost:.2f}")
