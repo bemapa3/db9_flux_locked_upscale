@@ -7,7 +7,8 @@
   - mask cây nới ~28 px **chỉ vào vùng trời** (sáng, ngả xanh dương, phẳng) → lá mảnh ở mép tán lấy trọn từ một lượt, không còn lá bán trong suốt. Tường/mái không bị lan vào (kiểm tra góc mái be).
   - Kiểm chứng: so crop 100 % ảnh thô (trước Color Restore) — lá mờ sinh ra trong bước upscale, không phải do khoá màu.
 - **Cây nền nét hơn**: preset `veg_denoise` 0.42 → 0.48 (một lượt duy nhất). Độ chi tiết vùng cây nền góc trái +7 %, không chồng hình.
-- **Khớp tông màu theo dải sáng** — `tone_match` (mặc định 1.0) trong DB9 Exact Color Restore, đo ở ~2k. Thêm node có sẵn **KJNodes ColorMatch (hm-mvgd-hm)** cuối workflow. Đo lệch a/b theo dải sáng so với ảnh gốc (ΔE trung bình / tối đa): v4.3 0.52 / 1.16 → tone_match 0.45 / 1.09 → tone_match + ColorMatch 0.42 / 0.82. Bóng tối sâu nhất hết ngả xanh lá (a −1.0 → −0.2).
+- **Khớp tông màu theo dải sáng** — `tone_match` (mặc định 1.0) trong DB9 Exact Color Restore, đo ở ~2k. Đo lệch a/b theo dải sáng so với ảnh gốc (ΔE trung bình / tối đa) trên ảnh 6k: v4.3 0.52 / 1.16 → v4.4 0.42 / 0.94. Bóng tối sâu nhất hết ngả xanh lá (a −1.0 → −0.2).
+- Thử và **bỏ** KJNodes **ColorMatch** (hm-mvgd-hm) cuối workflow: thử ở 2k thì tốt (0.42 / 0.82) nhưng chạy thật ở 6k làm lệch xa hơn (1.20 / 3.86, vùng sáng ngả xanh dương) và giảm tương phản lá → không đưa vào workflow, không thêm vào danh sách cài node.
 - **DB9 Exact Color Restore chạy trên GPU** (tự lùi về CPU khi thiếu VRAM): trước đó lọc trên CPU mất ~5 phút cho ảnh 6000×4500.
 - `veg_blur_boost` / `veg_blur_fraction` (mặc định **tắt**): lượt phụ denoise cao cho vùng cây mờ nhất, chỉ ở phần trong tán. Thử nghiệm cho thấy trộn hai lượt vẽ khác nhau vẫn có thể tạo lá trong suốt → không dùng trong preset.
 - Thử và **bỏ**: nới mask cây 24 px ra mọi hướng (tạo mảng vuông sáng trên trời, vẽ bẩn góc mái).

@@ -140,8 +140,8 @@ MiDaS model weights are downloaded automatically on first use via `torch.hub`.
 
 ### Tested preset: architecture + landscape, 2k → 6k (v4.4)
 
-v4.3 preset with `veg_denoise` **0.48**, `veg_blur_boost` 0, Exact Color Restore `tone_match` 1.0,
-then **ColorMatch** (ComfyUI-KJNodes, method `hm-mvgd-hm`, `image_ref` = original) before Save.
+v4.3 preset with `veg_denoise` **0.48**, `veg_blur_boost` 0, Exact Color Restore `tone_match` 1.0.
+(Do not add a histogram ColorMatch after it: tested at 6k it shifted highlights towards blue.)
 v4.4 also (no new inputs) matches the low frequencies of the vegetation pass to the main pass and
 grows the vegetation mask into sky only — no more bright halos / translucent leaves at canopy edges.
 Workflow: `workflows/DB9_FluxLockedUpscale_v4.4.0_2026-11-06_api.json`.
