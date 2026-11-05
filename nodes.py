@@ -1,5 +1,11 @@
 """
 db9_flux_locked_upscale / nodes.py
+v4.2.0 — 2026-11-05 (see CHANGELOG.md)
+  - upscale_model works on ComfyUI >= 0.3x (comfy_extras V3 ImageUpscaleWithModel)
+  - vegetation pass (veg_denoise / positive_veg) + arch_detail_lock
+  - new node DB9ExactColorRestore (Lab colour lock to the original)
+  - center-cut seam blending (no more blurry bands along tile overlaps)
+
 Rewrite v3 — 2026-06-01
 
 v3 Fixes (detail blur on small structures):
@@ -127,6 +133,37 @@ def _make_positions(size: int, tile: int, overlap: int):
         positions.append(last)
     return positions
 
+
+
+def _seam_axis(positions, i, tile, size, feather, dtype=torch.float32):
+    """1-D weights for tile i: 1 inside its own region, cosine cross-fade of width `feather`
+    centred on the middle of each overlap. Neighbouring ramps are complementary (sum = 1)."""
+    p = positions[i]
+    n = min(tile, size - p)
+    t = torch.arange(n, dtype=dtype) + (p + 0.5)
+    w = torch.ones(n, dtype=dtype)
+    if i > 0:
+        o0, o1 = p, min(positions[i - 1] + tile, size)
+        if o1 > o0:
+            mid = 0.5 * (o0 + o1)
+            f = float(max(1.0, min(float(feather), float(o1 - o0))))
+            r = ((t - (mid - f / 2.0)) / f).clamp(0.0, 1.0)
+            w = w * (0.5 - 0.5 * torch.cos(r * math.pi))
+    if i < len(positions) - 1:
+        o0, o1 = positions[i + 1], min(p + tile, size)
+        if o1 > o0:
+            mid = 0.5 * (o0 + o1)
+            f = float(max(1.0, min(float(feather), float(o1 - o0))))
+            r = (((mid + f / 2.0) - t) / f).clamp(0.0, 1.0)
+            w = w * (0.5 - 0.5 * torch.cos(r * math.pi))
+    return w
+
+
+def _seam_mask(y, x, y_positions, x_positions, tile_h, tile_w, out_h, out_w, feather):
+    """(1,1,th,tw) centre-cut blend mask for the tile starting at (y, x)."""
+    wy = _seam_axis(y_positions, y_positions.index(y), tile_h, out_h, feather)
+    wx = _seam_axis(x_positions, x_positions.index(x), tile_w, out_w, feather)
+    return (wy[:, None] * wx[None, :])[None, None].clamp_min(1e-6)
 
 def _cosine_mask(h: int, w: int, feather: int, device, dtype) -> torch.Tensor:
     """
@@ -301,8 +338,35 @@ def _detail_preserving_color_lock(
         
     return (corrected_lf + src_hf).clamp(0.0, 1.0)
 
+
+def _vegetation_mask(img, threshold=0.05, blur=24):
+    """Soft vegetation mask (B,1,H,W) from an NCHW image: normalized excess-green x saturation, box-blurred."""
+    r, g, b = img[:, 0:1], img[:, 1:2], img[:, 2:3]
+    ssum = (r + g + b).clamp_min(1e-4)
+    exg = (2.0 * g - r - b) / ssum
+    mx = torch.max(torch.max(r, g), b)
+    mn = torch.min(torch.min(r, g), b)
+    sat = (mx - mn) / mx.clamp_min(1e-4)
+    m = ((exg - threshold) / 0.10).clamp(0, 1) * ((sat - 0.08) / 0.10).clamp(0, 1)
+    if blur > 0:
+        k = (int(blur) * 2) | 1
+        m = F.avg_pool2d(m, k, stride=1, padding=k // 2, count_include_pad=False)
+        m = F.avg_pool2d(m, k, stride=1, padding=k // 2, count_include_pad=False)
+    return m.clamp(0, 1)
+
 def _upscale_with_model(upscale_model, image_bhwc):
     """Use ComfyUI ImageUpscaleWithModel. Returns BHWC or None on failure."""
+    # ComfyUI >= 0.3x: V3 node in comfy_extras (classmethod execute -> NodeOutput)
+    if upscale_model is not None:
+        try:
+            from comfy_extras.nodes_upscale_model import ImageUpscaleWithModel as _U
+            fn = getattr(_U, "execute", None)
+            out = fn(upscale_model, image_bhwc) if fn is not None else _U().upscale(upscale_model, image_bhwc)
+            res = getattr(out, "result", out)
+            print(f"[DB9] Base upscale with model OK -> {tuple(res[0].shape)}")
+            return res[0]
+        except Exception as e:
+            print(f"[DB9] comfy_extras upscale failed ({e}), trying legacy API.")
     if comfy_nodes is None or upscale_model is None:
         return None
     try:
@@ -882,6 +946,12 @@ class DB9FluxLockedControlNetUpscale:
                 # --- ControlNet-free structure guide (works with any model) ---
                 "structure_guide_image": ("IMAGE",),
                 "structure_guide_strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
+                # --- v4: vegetation-aware dual denoise + architecture detail lock ---
+                "veg_denoise": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "veg_mask_threshold": ("FLOAT", {"default": 0.05, "min": -0.2, "max": 0.5, "step": 0.01}),
+                "veg_mask_blur": ("INT", {"default": 24, "min": 0, "max": 128, "step": 1}),
+                "arch_detail_lock": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "positive_veg": ("CONDITIONING",),
             },
         }
 
@@ -900,6 +970,8 @@ class DB9FluxLockedControlNetUpscale:
         control_net=None, control_image=None,
         control_strength=0.65, control_start_percent=0.0, control_end_percent=0.75,
         structure_guide_image=None, structure_guide_strength=0.5,
+        veg_denoise=0.0, veg_mask_threshold=0.05, veg_mask_blur=24,
+        arch_detail_lock=0.0, positive_veg=None,
     ):
         src = _bhwc_to_nchw(image)
         b, c, h, w = src.shape
@@ -1049,6 +1121,25 @@ class DB9FluxLockedControlNetUpscale:
                 if sampled_nchw.shape[2:] != (th, tw):
                     sampled_nchw = _resize_nchw(sampled_nchw, (th, tw), "bicubic")
 
+                # --- v4: architecture detail lock (keep base structure >~7px, take only fine grain from model) ---
+                if arch_detail_lock > 0:
+                    sampled_nchw = _frequency_structure_lock(sampled_nchw, tile_ref, arch_detail_lock, blur_radius=3)
+                # --- v4: vegetation pass (higher denoise, own prompt), blended by soft mask ---
+                if veg_denoise > 0:
+                    _veg_m = _vegetation_mask(tile_ref, veg_mask_threshold, veg_mask_blur)
+                    _veg_cov = float(_veg_m.mean())
+                    if _veg_cov >= 0.01:
+                        _vp = _clone_conditioning(positive_veg if positive_veg is not None else positive)
+                        _vb = _sample_tile(
+                            model, _vp, _clone_conditioning(negative), vae, tile_image_bhwc,
+                            int(seed) + tile_index, steps, cfg, sampler_name, scheduler, veg_denoise,
+                        )
+                        _vn = _bhwc_to_nchw(_vb).to(cpu)
+                        if _vn.shape[2:] != (th, tw):
+                            _vn = _resize_nchw(_vn, (th, tw), "bicubic")
+                        sampled_nchw = sampled_nchw * (1.0 - _veg_m) + _vn * _veg_m
+                        print(f"[DB9] Tile {tile_index + 1}: vegetation {_veg_cov * 100:.0f}% -> veg pass denoise={veg_denoise}")
+
                 # Per-tile post-processing (detail-preserving: only corrects LF, keeps HF intact)
                 if color_lock_strength > 0 or contrast_lock_strength > 0:
                     sampled_nchw = _detail_preserving_color_lock(
@@ -1066,7 +1157,7 @@ class DB9FluxLockedControlNetUpscale:
                     )
 
                 # Blend into canvas
-                mask = _cosine_mask(th, tw, feather, cpu, torch.float32)
+                mask = _seam_mask(y, x, y_positions, x_positions, tile_height, tile_width, out_h, out_w, feather)
                 acc[:, :, y:y2, x:x2] += sampled_nchw * mask
                 wts[:, :, y:y2, x:x2] += mask
 
@@ -1092,7 +1183,115 @@ class DB9FluxLockedControlNetUpscale:
 # ComfyUI registration
 # ===========================================================================
 
+
+# ===========================================================================
+# Node: DB9ExactColorRestore (v4.1)
+# ===========================================================================
+
+def _srgb_to_lab(x):
+    """NCHW sRGB [0,1] -> CIE Lab (D65)."""
+    x = x.clamp(0.0, 1.0)
+    lin = torch.where(x <= 0.04045, x / 12.92, ((x + 0.055) / 1.055) ** 2.4)
+    r, g, b = lin[:, 0:1], lin[:, 1:2], lin[:, 2:3]
+    X = (0.4124564 * r + 0.3575761 * g + 0.1804375 * b) / 0.95047
+    Y = 0.2126729 * r + 0.7151522 * g + 0.0721750 * b
+    Z = (0.0193339 * r + 0.1191920 * g + 0.9503041 * b) / 1.08883
+
+    def f(t):
+        return torch.where(t > 0.008856, t.clamp_min(1e-8) ** (1.0 / 3.0), 7.787 * t + 16.0 / 116.0)
+
+    fx, fy, fz = f(X), f(Y), f(Z)
+    return torch.cat([116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz)], 1)
+
+
+def _lab_to_srgb(lab):
+    """CIE Lab (D65) -> NCHW sRGB [0,1]."""
+    L, a, b = lab[:, 0:1], lab[:, 1:2], lab[:, 2:3]
+    fy = (L + 16.0) / 116.0
+    fx = fy + a / 500.0
+    fz = fy - b / 200.0
+
+    def fi(t):
+        return torch.where(t > 0.206893, t ** 3, (t - 16.0 / 116.0) / 7.787)
+
+    X = fi(fx) * 0.95047
+    Y = fi(fy)
+    Z = fi(fz) * 1.08883
+    r = 3.2404542 * X - 1.5371385 * Y - 0.4985314 * Z
+    g = -0.9692660 * X + 1.8760108 * Y + 0.0415560 * Z
+    bb = 0.0556434 * X - 0.2040259 * Y + 1.0572252 * Z
+    lin = torch.cat([r, g, bb], 1).clamp(0.0, 1.0)
+    out = torch.where(lin <= 0.0031308, lin * 12.92, 1.055 * lin.clamp_min(1e-8) ** (1.0 / 2.4) - 0.055)
+    return out.clamp(0.0, 1.0)
+
+
+def _soft_blur(x, radius):
+    """Approximate gaussian: two box blurs (edge-normalised)."""
+    if radius <= 0:
+        return x
+    k = (int(radius) * 2) | 1
+    x = F.avg_pool2d(x, k, stride=1, padding=k // 2, count_include_pad=False)
+    return F.avg_pool2d(x, k, stride=1, padding=k // 2, count_include_pad=False)
+
+
+def _exact_color_restore(src, ref, luma_radius=16, chroma_radius=4, luma_strength=1.0, chroma_strength=1.0):
+    """src/ref: NCHW sRGB, same size. Replace LF luminance + chroma of src by ref, keep HF of src."""
+    ls = _srgb_to_lab(src)
+    lr = _srgb_to_lab(ref)
+    L, Lr = ls[:, 0:1], lr[:, 0:1]
+    ab, abr = ls[:, 1:3], lr[:, 1:3]
+    if luma_strength > 0:
+        L_new = L - _soft_blur(L, luma_radius) + _soft_blur(Lr, luma_radius)
+        L = torch.lerp(L, L_new, luma_strength)
+    if chroma_strength > 0:
+        ab_new = ab - _soft_blur(ab, chroma_radius) + _soft_blur(abr, chroma_radius)
+        ab = torch.lerp(ab, ab_new, chroma_strength)
+    return _lab_to_srgb(torch.cat([L, ab], 1))
+
+
+class DB9ExactColorRestore:
+    """Lock colours/tones to the original image (Lab). Keeps the fine detail of `image`.
+
+    luma_radius   : px (at output size) above which brightness follows the reference.
+    chroma_radius : px above which hue/saturation follow the reference (small = exact colour).
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "reference": ("IMAGE",),
+                "luma_radius": ("INT", {"default": 16, "min": 0, "max": 256, "step": 1}),
+                "chroma_radius": ("INT", {"default": 4, "min": 0, "max": 128, "step": 1}),
+                "luma_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "chroma_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+    FUNCTION = "restore"
+    CATEGORY = "DB9/Flux Locked Upscale"
+
+    def restore(self, image, reference, luma_radius, chroma_radius, luma_strength, chroma_strength):
+        src = _bhwc_to_nchw(image).cpu()
+        ref = _bhwc_to_nchw(reference).cpu()
+        if ref.shape[0] != src.shape[0]:
+            ref = ref[:1].expand(src.shape[0], -1, -1, -1)
+        if ref.shape[2:] != src.shape[2:]:
+            ref = _resize_nchw(ref, src.shape[2:], "bicubic").clamp(0.0, 1.0)
+        outs = []
+        for i in range(src.shape[0]):
+            outs.append(_exact_color_restore(
+                src[i:i + 1], ref[i:i + 1], luma_radius, chroma_radius, luma_strength, chroma_strength))
+        print(f"[DB9] Exact color restore: luma_r={luma_radius} chroma_r={chroma_radius} "
+              f"strength=({luma_strength:.2f},{chroma_strength:.2f})")
+        return (_nchw_to_bhwc(torch.cat(outs, 0)),)
+
+
 NODE_CLASS_MAPPINGS = {
+    "DB9ExactColorRestore": DB9ExactColorRestore,
     "DB9GlobalControlGuide": DB9GlobalControlGuide,
     "DB9MiDaSDepth": DB9MiDaSDepth,
     "DB9FluxControlNetLoader": DB9FluxControlNetLoader,
@@ -1103,6 +1302,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "DB9ExactColorRestore": "DB9 Exact Color Restore",
     "DB9GlobalControlGuide": "DB9 Global Control Guide",
     "DB9MiDaSDepth": "DB9 MiDaS Depth",
     "DB9FluxControlNetLoader": "DB9 Flux ControlNet Loader",

@@ -1,0 +1,9 @@
+{
+  "name": "db9_flux_locked_upscale",
+  "version": "4.2.0",
+  "date": "2026-11-05",
+  "history": [
+    { "version": "4.2.0", "date": "2026-11-05", "summary": "Fix upscale_model on ComfyUI >= 0.3x, vegetation pass + arch detail lock, DB9 Exact Color Restore, center-cut seam blending" },
+    { "version": "3.0.0", "date": "2026-06-01", "summary": "Rewrite v3: detail-preserving color lock, unsharp mask, CPU canvas, tile split/merge, MiDaS, ControlNet loader" }
+  ]
+}

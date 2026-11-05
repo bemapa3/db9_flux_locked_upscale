@@ -18,11 +18,15 @@ All-in-one tiled upscale. Handles: base upscale → tile sampling → color lock
 - `scale` — output scale multiplier (e.g. 2.0 for 2x)
 - `tile_width / tile_height` — tile size (default 1536, best for Flux 2 Klein)
 - `overlap` — tile overlap in pixels (default 192)
-- `feather` — cosine blend radius (default 128)
+- `feather` — width of the cross-fade band at the middle of each tile overlap (default 128). Since v4.2 each pixel comes from one tile; only this band is blended.
 - `color_lock_strength` — per-tile + global color correction (default 0.55)
 - `contrast_lock_strength` — per-tile + global contrast correction (default 0.20)
-- `upscale_model` *(optional)* — UPSCALE_MODEL for pixel-space base pass (Real-ESRGAN etc)
+- `upscale_model` *(optional)* — UPSCALE_MODEL for pixel-space base pass (Nomos8kSC, Real-ESRGAN, UltraSharp…). Works on ComfyUI ≥ 0.3x since v4.2 (was silently falling back to bicubic before).
 - `control_net / control_image` *(optional)* — ControlNet guidance per tile
+- `arch_detail_lock` *(optional, v4)* — keep the base image structure above ~7 px in the sampled tile, take only fine grain from Flux. Stops material/pattern hallucination on buildings (0 = off, 0.5 recommended).
+- `veg_denoise` *(optional, v4)* — second sampling pass for foliage/grass at a higher denoise, blended by an automatic vegetation mask (0 = off, 0.40–0.45 recommended).
+- `veg_mask_threshold` / `veg_mask_blur` *(optional, v4)* — vegetation mask tuning (excess-green threshold, softness in px).
+- `positive_veg` *(optional, v4)* — separate prompt for the vegetation pass (e.g. "raw photo, photorealistic vegetation, individual leaves, natural grass blades").
 
 **Outputs:** `image` (upscaled), `base_reference` (pixel-upscaled base for comparison)
 
@@ -80,7 +84,18 @@ Generate edge/depth control images without external preprocessors.
 ---
 
 ### DB9 Color Tone Lock
-Post-process color and contrast correction against a reference image.
+Post-process color and contrast correction against a reference image (global mean/std).
+
+---
+
+### DB9 Exact Color Restore *(v4.2)*
+Locks colours to the original image in CIE Lab. Low-frequency luminance and chroma come from
+`reference`; high-frequency detail added by Flux is kept from `image`. Put it last, before Save,
+with `reference` = the original (un-upscaled) image.
+
+**Inputs:** `image`, `reference`, `luma_radius` (default 16 px), `chroma_radius` (default 4 px),
+`luma_strength`, `chroma_strength` (default 1.0)
+**Outputs:** `image`
 
 ---
 
@@ -112,3 +127,20 @@ MiDaS model weights are downloaded automatically on first use via `torch.hub`.
 | cfg | 1.0 |
 | color_lock_strength | 0.45 - 0.65 |
 | contrast_lock_strength | 0.15 - 0.25 |
+
+### Tested preset: architecture + landscape, 2k → 6k (v4.2)
+
+| Parameter | Value |
+|-----------|-------|
+| upscale_model | 4xNomos8kSC |
+| scale | 3.0 |
+| tile_width / tile_height / overlap / feather | 1536 / 192 / 128 |
+| steps / cfg / sampler / scheduler | 20 / 1.0 / euler / simple |
+| denoise (buildings) | 0.28 |
+| arch_detail_lock | 0.5 |
+| veg_denoise (+ `positive_veg`) | 0.42 |
+| sharpen_strength | 0.0 |
+| color_lock / contrast_lock | 0.75 / 0.20 |
+| Final node | DB9 Exact Color Restore (16 / 4 / 1.0 / 1.0) |
+
+Avoid noise-offset LoRAs in this chain: they shift shadows and colour.
