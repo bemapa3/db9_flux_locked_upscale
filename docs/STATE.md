@@ -45,6 +45,15 @@ Cập nhật: 2026-11-05 23:30 (Asia/Saigon)
   (HF energy cây nền 0.0485 → 0.0481, nhìn giống hệt). Cây nền đã mờ sẵn trong ảnh gốc (ảnh render
   có DOF); veg_denoise 0.42 giữ nguyên độ mờ đó.
 
+## 2026-11-06 00:10 — v4.4 (wip, commit a260cb8, chưa tag)
+- v4.4  `veg_blur_boost` (0.10) / `veg_blur_fraction` (0.35): lượt thứ 3 cho phần cây mờ nhất (denoise 0.42+0.10).
+- v4.4b `tone_match` (1.0) trong Exact Color Restore: khớp a/b theo từng dải sáng (chủ thấy gốc ám tím, bản upscale ám xanh lá).
+- v4.4c mask cây nới thêm ~24 px để lá mảnh ở mép tán trên nền trời chỉ lấy từ 1 lượt → hết lá "ghost" (chủ khoanh đỏ).
+- Colab đổi sang **A100 80GB** (6.88 đv/giờ, rẻ hơn G4 10.05). Chậm: ~1.7 s/bước, 6k mất ~35 phút với vram_mode `high (32GB)`.
+- Render test: `BBB-Upscale_v44_*` (script queue `/content/q44.py`, đo `/content/m44.py` — mất khi tắt runtime;
+  bản copy ở scratchpad Claude). Cài nodes.py v4.4 lên Colab: copy repo Drive vào custom_nodes rồi ghi đè nodes.py (md5 64cc948d…).
+- Lưu ý vram_mode giá trị đầy đủ: 'auto','low (<=16GB)','medium (24GB)','high (32GB)','xhigh (40-48GB)','ultra (80GB+)'.
+
 ## Ý tưởng tiếp theo
 - Làm nét cây nền: chạy riêng vùng cây nền với veg_denoise cao hơn (0.55–0.6) bằng mask "nền mờ"
   (vùng cây có HF energy thấp trong ảnh base) → cần chống bịa chi tiết; hoặc hỏi chủ có muốn giữ
