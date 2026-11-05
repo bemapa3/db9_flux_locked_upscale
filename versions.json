@@ -1,10 +1,27 @@
 {
   "name": "db9_flux_locked_upscale",
-  "version": "4.3.0",
-  "date": "2026-11-05",
+  "version": "4.4.0",
+  "date": "2026-11-06",
   "history": [
-    { "version": "4.3.0", "date": "2026-11-05", "summary": "Edge-aware Exact Color Restore, vegetation mask v2 (+flowers), texture_limit, vram_mode/tile_batch with OOM fallback" },
-    { "version": "4.2.0", "date": "2026-11-05", "summary": "Fix upscale_model on ComfyUI >= 0.3x, vegetation pass + arch detail lock, DB9 Exact Color Restore, center-cut seam blending" },
-    { "version": "3.0.0", "date": "2026-06-01", "summary": "Rewrite v3: detail-preserving color lock, unsharp mask, CPU canvas, tile split/merge, MiDaS, ControlNet loader" }
+    {
+      "version": "4.4.0",
+      "date": "2026-11-06",
+      "summary": "Adaptive denoise for blurry vegetation, low-frequency pass harmonisation + sky-only mask growth (no ghost halos), tone-dependent colour match"
+    },
+    {
+      "version": "4.3.0",
+      "date": "2026-11-05",
+      "summary": "Edge-aware Exact Color Restore, vegetation mask v2 (+flowers), texture_limit, vram_mode/tile_batch with OOM fallback"
+    },
+    {
+      "version": "4.2.0",
+      "date": "2026-11-05",
+      "summary": "Fix upscale_model on ComfyUI >= 0.3x, vegetation pass + arch detail lock, DB9 Exact Color Restore, center-cut seam blending"
+    },
+    {
+      "version": "3.0.0",
+      "date": "2026-06-01",
+      "summary": "Rewrite v3: detail-preserving color lock, unsharp mask, CPU canvas, tile split/merge, MiDaS, ControlNet loader"
+    }
   ]
 }

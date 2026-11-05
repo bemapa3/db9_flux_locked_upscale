@@ -1,5 +1,19 @@
 # Changelog
 
+## v4.4.0 — 2026-11-06
+### ✅ Đã làm
+- **Cây nền nhoè** — `veg_blur_boost` / `veg_blur_fraction` (mặc định tắt; preset 0.10 / 0.35): tìm 35 % vùng cây kém nét nhất trong ảnh base, chạy thêm một lượt với denoise `veg_denoise + veg_blur_boost` (0.42 → 0.52) và trộn theo mask mềm. Ảnh test: 15–22 % ảnh được tăng nét; vùng cây nền góc trái (chủ khoanh) nét hơn v4.3 khi so crop 100 %.
+- **Hết quầng sáng / "ghost" ở mép tán cây trên nền trời** — trước khi trộn, tần số thấp (~24 px: tông trời, bóng đổ) của lượt cây được cân về đúng lượt chính, chỉ giữ chi tiết lá; mask cây được nới ~28 px **chỉ vào vùng trời** (sáng, ngả xanh dương, phẳng) để lá mảnh ở mép tán lấy trọn từ một lượt. So crop 100 % (vùng chủ khoanh đỏ): hết mảng trời sáng quanh tán, lá mờ bán trong suốt giảm rõ; góc mái/tường không bị ảnh hưởng.
+- **Khớp tông màu theo dải sáng** — `tone_match` (mặc định 1.0) trong DB9 Exact Color Restore: so trung bình a/b từng dải độ sáng (tối → sáng) giữa ảnh mới và ảnh gốc, đo ở ~2k để độ nét khác nhau không làm lệch thống kê. Ảnh test: bóng tối sâu nhất lệch xanh lá a −1.0 → −0.5, vùng sáng giữ ≈ 0 (bản thử đầu đo ở 6k làm vùng sáng ngả xanh dương −1.4 b — đã sửa).
+- Thử và **bỏ**: nới mask cây 24 px ra mọi hướng (v4.4c) → tạo mảng vuông sáng trên trời và vẽ bẩn lên góc mái be.
+- Colab: chạy được trên A100 80 GB với `vram_mode` = `high (32GB)` (giả lập RTX 5090): batch 2, VAE không chia ô, 6000×4500 ≈ 20–27 phút (A100 chậm hơn RTX PRO 6000 ~2.5 lần).
+
+### ⏳ Chưa làm / chưa kiểm chứng
+- Vẫn còn vài lá mờ nhẹ ở mép tán (do Flux vẽ lá lệch vị trí so với ảnh gốc).
+- Dải sáng trung bình (L 60–70) vẫn lệch nhẹ a +0.7 / b −0.8.
+- `veg_blur_boost` tăng ~30–40 % thời gian ở các tile có cây mờ.
+- Chưa chạy thật trên RTX 5070 Ti / 5090.
+
 ## v4.3.0 — 2026-11-05
 ### ✅ Đã làm
 - **Exact Color Restore v2** (sửa viền vàng/xanh quanh lá trên nền trời và lá bị "bóng ma"): chỉ chỉnh màu/độ sáng ở tần số thấp (mặc định `luma_radius` 32, `chroma_radius` 24), trường hiệu chỉnh được lọc bằng guided filter theo ảnh mới (`edge_aware`, mặc định bật) nên bám theo mép lá mới. Kiểm chứng bằng mắt trên vùng cây/trời: hết quầng vàng.

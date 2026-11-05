@@ -1,6 +1,11 @@
 """
 db9_flux_locked_upscale / nodes.py
-v4.3.0 — 2026-11-05 (see CHANGELOG.md)
+v4.4.0 — 2026-11-06 (see CHANGELOG.md)
+  - veg_blur_boost / veg_blur_fraction: extra pass for the blurriest vegetation
+  - vegetation/blur passes harmonised to the main pass at low frequency (no halos)
+  - vegetation mask grows into sky only (fewer translucent "ghost" leaves)
+  - Exact Color Restore tone_match: per-lightness-band a/b match (measured at ~2k)
+v4.3.0 — 2026-11-05
   - Exact Color Restore v2: low-frequency, edge-aware (no halos / ghost leaves)
   - vegetation mask v2 (shadow foliage, flowers, steep edge), texture_limit
   - vram_mode / tile_batch: VRAM-aware tile size, batching, tiled VAE, OOM fallback
@@ -373,8 +378,14 @@ def _blurry_veg_mask(base, veg_mask, fraction=0.35, energy_radius=16):
         return torch.zeros_like(veg_mask)
     sel = sel[:: max(1, sel.numel() // 200000)]
     thr = float(torch.quantile(sel, float(min(max(fraction, 0.01), 0.99))))
-    soft = ((thr * 1.25 - e) / max(thr * 0.5, 1e-6)).clamp(0, 1)
-    soft = _box(soft, 4)
+    soft = ((thr * 1.15 - e) / max(thr * 0.3, 1e-6)).clamp(0, 1)
+    # v4.4h: only the INTERIOR of the vegetation (>= ~48 px from its edge). At canopy edges the extra
+    # pass draws leaves in other places than the vegetation pass; blending them there gave
+    # translucent double ("ghost") leaves against the sky.
+    hard = (vm > 0.5).float()
+    interior = -F.max_pool2d(-hard, 49, 1, 24)
+    soft = soft * _box(interior, 6)
+    soft = _box(soft, 3)
     soft = F.interpolate(soft, size=(H, W), mode="bilinear", align_corners=False)
     return (soft * veg_mask).clamp(0, 1)
 
@@ -1635,7 +1646,7 @@ def _tone_color_match(lab, ref_lab, strength=1.0, bands=12, max_pixels=400000):
         ab = t[0, 1:3].reshape(2, -1)
         step = max(1, L.numel() // max_pixels)
         L, ab = L[::step], ab[:, ::step]
-        centers = torch.linspace(0.0, 100.0, bands)
+        centers = torch.linspace(0.0, 100.0, bands, device=t.device)
         width = 100.0 / (bands - 1)
         w = (1.0 - (L[None, :] - centers[:, None]).abs() / width).clamp(min=0.0)   # (bands, N)
         n = w.sum(1)
@@ -1651,7 +1662,7 @@ def _tone_color_match(lab, ref_lab, strength=1.0, bands=12, max_pixels=400000):
     off = (m_ref - m_src) * valid                                                   # (bands, 2)
     # smooth the per-band offsets so the correction curve is gentle
     off = F.avg_pool1d(off.t()[None], 3, 1, 1, count_include_pad=False)[0].t()
-    centers = torch.linspace(0.0, 100.0, bands)
+    centers = torch.linspace(0.0, 100.0, bands, device=lab.device)
     width = 100.0 / (bands - 1)
     L = lab[0, 0]
     w = (1.0 - (L[None] - centers[:, None, None]).abs() / width).clamp(min=0.0)    # (bands, H, W)
@@ -1725,9 +1736,19 @@ class DB9ExactColorRestore:
             ref = _resize_nchw(ref, src.shape[2:], "bicubic").clamp(0.0, 1.0)
         outs = []
         for i in range(src.shape[0]):
-            outs.append(_exact_color_restore(
-                src[i:i + 1], ref[i:i + 1], luma_radius, chroma_radius, luma_strength, chroma_strength,
-                edge_aware, tone_match))
+            args = (luma_radius, chroma_radius, luma_strength, chroma_strength, edge_aware, tone_match)
+            res = None
+            # v4.4: run on the GPU when possible (CPU box filters on 27 MP took ~5 min); fall back to CPU
+            if torch.cuda.is_available():
+                try:
+                    res = _exact_color_restore(src[i:i + 1].cuda(), ref[i:i + 1].cuda(), *args).cpu()
+                except torch.cuda.OutOfMemoryError:
+                    res = None
+                    torch.cuda.empty_cache()
+                    print("[DB9] Exact color restore: GPU OOM -> CPU")
+            if res is None:
+                res = _exact_color_restore(src[i:i + 1], ref[i:i + 1], *args)
+            outs.append(res)
         print(f"[DB9] Exact color restore: luma_r={luma_radius} chroma_r={chroma_radius} "
               f"strength=({luma_strength:.2f},{chroma_strength:.2f})")
         return (_nchw_to_bhwc(torch.cat(outs, 0)),)

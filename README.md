@@ -31,6 +31,8 @@ All-in-one tiled upscale. Handles: base upscale → tile sampling → color lock
 - `texture_limit` *(optional, v4.3)* — in architecture areas, cap Flux detail energy at N × the base image's local detail (0 = off, 1.25 recommended). Stops invented cracks / mosaic on plain walls and sand.
 - `vram_mode` *(optional, v4.3)* — `auto` (default) reads GPU memory: ≤16 GB → tile 1024 + tiled VAE; 24 GB → tile 1280 + tiled VAE; 32 GB → batch ≤2; 40–48 GB → batch ≤3; 80 GB+ → batch ≤6. Batch is then sized from the measured memory of the first tile; on OOM it halves the batch, then switches to tiled VAE.
 - `tile_batch` *(optional, v4.3)* — force a batch size (0 = automatic).
+- `veg_blur_boost` *(optional, v4.4)* — extra denoise for the blurriest part of the vegetation (soft background trees baked into the render). 0 = off, 0.10 = "a bit sharper". Costs one more sampling pass on tiles that contain such vegetation (~+30–40 % time).
+- `veg_blur_fraction` *(optional, v4.4)* — share of the vegetation (least sharp first) that gets the boost, default 0.35.
 
 **Outputs:** `image` (upscaled), `base_reference` (pixel-upscaled base for comparison)
 
@@ -99,7 +101,10 @@ follows the new edges (no halos or ghost tints where Flux moved leaves). Put it 
 with `reference` = the original (un-upscaled) image.
 
 **Inputs:** `image`, `reference`, `luma_radius` (default 32 px), `chroma_radius` (default 24 px),
-`luma_strength`, `chroma_strength` (default 1.0), `edge_aware` (default on)
+`luma_strength`, `chroma_strength` (default 1.0), `edge_aware` (default on),
+`tone_match` *(v4.4, default 1.0)* — after the spatial lock, match the mean a/b of every lightness
+band (shadows → highlights) to the reference, measured at ~2k so sharpness differences don't bias
+it. Fixes casts that cancel out on average (e.g. greener shadows while highlights are fine). 0 = off.
 **Outputs:** `image`
 
 ---
@@ -133,7 +138,14 @@ MiDaS model weights are downloaded automatically on first use via `torch.hub`.
 | color_lock_strength | 0.45 - 0.65 |
 | contrast_lock_strength | 0.15 - 0.25 |
 
-### Tested preset: architecture + landscape, 2k → 6k (v4.3)
+### Tested preset: architecture + landscape, 2k → 6k (v4.4)
+
+v4.3 preset plus `veg_blur_boost` 0.10, `veg_blur_fraction` 0.35 and Exact Color Restore
+`tone_match` 1.0. v4.4 also (no new inputs) matches the low frequencies of the vegetation passes to
+the main pass and grows the vegetation mask into sky only, which removes the bright halos /
+translucent leaves at canopy edges against the sky.
+
+### Preset (v4.3)
 
 Same as the v4.2 table below, plus: `veg_include_flowers` on, `texture_limit` 1.25,
 `veg_mask_blur` 8, `vram_mode` auto, Exact Color Restore 32 / 24 / edge_aware, and remove
