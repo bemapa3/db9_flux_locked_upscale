@@ -1642,8 +1642,11 @@ def _tone_color_match(lab, ref_lab, strength=1.0, bands=12, max_pixels=400000):
         mean = (w[:, None, :] * ab[None]).sum(2) / n.clamp(min=1e-6)[:, None]   # (bands, 2)
         return mean, n
 
-    m_src, n_src = stats(lab)
-    m_ref, n_ref = stats(ref_lab)
+    # v4.4f: measure at ~2k so the sharp output and the soft (upscaled) reference have the same
+    # sharpness -- otherwise fine detail shifts pixels between lightness bands and biases the stats
+    f = max(1, int(round(max(lab.shape[2:]) / 2048)))
+    m_src, n_src = stats(F.avg_pool2d(lab, f) if f > 1 else lab)
+    m_ref, n_ref = stats(F.avg_pool2d(ref_lab, f) if f > 1 else ref_lab)
     valid = ((n_src > 200) & (n_ref > 200)).float()[:, None]
     off = (m_ref - m_src) * valid                                                   # (bands, 2)
     # smooth the per-band offsets so the correction curve is gentle
