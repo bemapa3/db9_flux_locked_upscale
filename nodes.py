@@ -347,12 +347,35 @@ def _texture_limit(out, base, limit, radius=2, energy_radius=6):
     return (lf + hf * gain).clamp(0.0, 1.0)
 
 
+
+def _detail_energy(img, radius=16):
+    """Local high-frequency energy of the luminance (B,1,H,W)."""
+    L = img.mean(1, keepdim=True)
+    return _box(_box((L - _box(L, 1)).abs(), radius), radius)
+
+
+def _blurry_veg_mask(base, veg_mask, fraction=0.35, energy_radius=16):
+    """Soft mask (B,1,H,W) of the blurriest `fraction` of vegetation in `base` (full image, CPU)."""
+    H, W = base.shape[2:]
+    small = F.interpolate(base, scale_factor=0.5, mode="area")
+    e = _detail_energy(small, max(4, energy_radius // 2))
+    vm = F.interpolate(veg_mask, size=e.shape[2:], mode="area")
+    sel = e[vm > 0.5]
+    if sel.numel() < 100:
+        return torch.zeros_like(veg_mask)
+    sel = sel[:: max(1, sel.numel() // 200000)]
+    thr = float(torch.quantile(sel, float(min(max(fraction, 0.01), 0.99))))
+    soft = ((thr * 1.25 - e) / max(thr * 0.5, 1e-6)).clamp(0, 1)
+    soft = _box(soft, 4)
+    soft = F.interpolate(soft, size=(H, W), mode="bilinear", align_corners=False)
+    return (soft * veg_mask).clamp(0, 1)
+
 def _db9_tiles_v43(base_cpu, model, vae, positive, negative, positive_veg,
                    out_h, out_w, y_positions, x_positions, tile_h, tile_w, feather,
                    seed, steps, cfg, sampler_name, scheduler, denoise,
                    veg_denoise, veg_mask_threshold, veg_mask_blur, veg_include_flowers,
                    arch_detail_lock, texture_limit, color_lock_strength, contrast_lock_strength,
-                   structure_full, sg_strength, plan):
+                   structure_full, sg_strength, plan, veg_blur_boost=0.0, veg_blur_fraction=0.35):
     """v4.3 tile loop: batched sampling with adaptive batch size and OOM fallback (no ControlNet)."""
     import time as _time
     cpu = torch.device("cpu")
@@ -375,6 +398,12 @@ def _db9_tiles_v43(base_cpu, model, vae, positive, negative, positive_veg,
     measured = bool(plan["fixed_batch"])
     cuda = torch.cuda.is_available()
     t0 = _time.time()
+    blur_full = None
+    if veg_denoise > 0 and veg_blur_boost > 0:
+        _vm_full = _vegetation_mask_v2(base_cpu, veg_mask_threshold, veg_mask_blur, veg_include_flowers)
+        blur_full = _blurry_veg_mask(base_cpu, _vm_full, veg_blur_fraction)
+        print(f"[DB9] v4.4 blurry vegetation: {float(blur_full.mean()) * 100:.1f}% of image -> "
+              f"denoise {veg_denoise:.2f}+{veg_blur_boost:.2f}")
 
     def run(imgs, pos, neg, sd, dn):
         nonlocal batch, tiled
@@ -437,6 +466,16 @@ def _db9_tiles_v43(base_cpu, model, vae, positive, negative, positive_veg,
                            int(seed) + i, veg_denoise)
                 for j, k in enumerate(idx):
                     vegs[k] = (_bhwc_to_nchw(vout[j:j + 1]), masks[k])
+        blurs = [None] * len(chunk)
+        if blur_full is not None:
+            bms = [blur_full[:, :, y:y2, x:x2] for (y, x, y2, x2) in chunk]
+            bidx = [k for k, bm in enumerate(bms) if float(bm.mean()) >= 0.01]
+            if bidx:
+                bimgs = torch.cat([imgs[k:k + 1] for k in bidx], 0)
+                bout = run(bimgs, positive_veg if positive_veg is not None else positive, negative,
+                           int(seed) + i + 7919, min(1.0, veg_denoise + veg_blur_boost))
+                for j, k in enumerate(bidx):
+                    blurs[k] = (_bhwc_to_nchw(bout[j:j + 1]), bms[k])
         for k, (y, x, y2, x2) in enumerate(chunk):
             ref = refs[k]
             sn = _bhwc_to_nchw(arch[k:k + 1]).to(cpu)
@@ -453,6 +492,12 @@ def _db9_tiles_v43(base_cpu, model, vae, positive, negative, positive_veg,
                     vn = _resize_nchw(vn, (th, tw), "bicubic")
                 sn = sn * (1.0 - vm) + vn * vm
                 vtag = f" veg={float(vm.mean()) * 100:.0f}%"
+            if blurs[k] is not None:
+                bn, bm = blurs[k]
+                if bn.shape[2:] != (th, tw):
+                    bn = _resize_nchw(bn, (th, tw), "bicubic")
+                sn = sn * (1.0 - bm) + bn * bm
+                vtag += f" soft={float(bm.mean()) * 100:.0f}%"
             if color_lock_strength > 0 or contrast_lock_strength > 0:
                 sn = _detail_preserving_color_lock(sn, ref, color_lock_strength, contrast_lock_strength, blur_radius=7)
             if structure_full is not None and sg_strength > 0:
@@ -1259,6 +1304,9 @@ class DB9FluxLockedControlNetUpscale:
                 "texture_limit": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 4.0, "step": 0.05}),
                 "vram_mode": (_VRAM_MODES, {"default": "auto"}),
                 "tile_batch": ("INT", {"default": 0, "min": 0, "max": 16, "step": 1}),
+                # --- v4.4 ---
+                "veg_blur_boost": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 0.5, "step": 0.01}),
+                "veg_blur_fraction": ("FLOAT", {"default": 0.35, "min": 0.05, "max": 0.95, "step": 0.05}),
             },
         }
 
@@ -1280,6 +1328,7 @@ class DB9FluxLockedControlNetUpscale:
         veg_denoise=0.0, veg_mask_threshold=0.05, veg_mask_blur=24,
         arch_detail_lock=0.0, positive_veg=None,
         veg_include_flowers=False, texture_limit=0.0, vram_mode="auto", tile_batch=0,
+        veg_blur_boost=0.0, veg_blur_fraction=0.35,
     ):
         src = _bhwc_to_nchw(image)
         b, c, h, w = src.shape
@@ -1360,6 +1409,7 @@ class DB9FluxLockedControlNetUpscale:
                 veg_denoise, veg_mask_threshold, veg_mask_blur, veg_include_flowers,
                 arch_detail_lock, texture_limit, color_lock_strength, contrast_lock_strength,
                 structure_full, _effective_sg_strength, _plan,
+                veg_blur_boost=veg_blur_boost, veg_blur_fraction=veg_blur_fraction,
             )
             if sharpen_strength > 0:
                 out = _unsharp_mask(out, strength=sharpen_strength, radius=3)
