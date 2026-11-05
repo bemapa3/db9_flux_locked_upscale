@@ -6,8 +6,8 @@
   - tần số thấp (~24 px: tông trời, bóng đổ) của lượt cây được cân về đúng lượt chính trước khi trộn, chỉ giữ chi tiết lá → hết mảng trời sáng quanh tán;
   - mask cây nới ~28 px **chỉ vào vùng trời** (sáng, ngả xanh dương, phẳng) → lá mảnh ở mép tán lấy trọn từ một lượt, không còn lá bán trong suốt. Tường/mái không bị lan vào (kiểm tra góc mái be).
   - Kiểm chứng: so crop 100 % ảnh thô (trước Color Restore) — lá mờ sinh ra trong bước upscale, không phải do khoá màu.
-- **Cây nền nét hơn**: preset `veg_denoise` 0.42 → 0.48 (một lượt duy nhất). Độ chi tiết vùng cây nền góc trái +7 %, không chồng hình.
-- **Khớp tông màu theo dải sáng** — `tone_match` (mặc định 1.0) trong DB9 Exact Color Restore, đo ở ~2k. Đo lệch a/b theo dải sáng so với ảnh gốc (ΔE trung bình / tối đa) trên ảnh 6k: v4.3 0.52 / 1.16 → v4.4 0.42 / 0.94. Bóng tối sâu nhất hết ngả xanh lá (a −1.0 → −0.2).
+- Preset `veg_denoise` 0.42 → 0.48 (một lượt duy nhất). Thử trên ảnh cắt góc trái: chi tiết cây nền +7 %; trên ảnh 6k đầy đủ đo vùng cây nền thì **không tăng rõ** (0.0963 → 0.0964) — cây nền vẫn mềm như ảnh gốc.
+- **Khớp tông màu theo dải sáng** — `tone_match` (mặc định 1.0) trong DB9 Exact Color Restore, đo ở ~2k. Đo lệch a/b theo dải sáng so với ảnh gốc (ΔE trung bình / tối đa) trên ảnh 6k: v4.3 0.52 / 1.16 → v4.4.0 0.46 / 1.01 (bản thử veg 0.42 + tone_match: 0.42 / 0.94). Bóng tối sâu nhất hết ngả xanh lá (a −1.0 → −0.2).
 - Thử và **bỏ** KJNodes **ColorMatch** (hm-mvgd-hm) cuối workflow: thử ở 2k thì tốt (0.42 / 0.82) nhưng chạy thật ở 6k làm lệch xa hơn (1.20 / 3.86, vùng sáng ngả xanh dương) và giảm tương phản lá → không đưa vào workflow, không thêm vào danh sách cài node.
 - **DB9 Exact Color Restore chạy trên GPU** (tự lùi về CPU khi thiếu VRAM): trước đó lọc trên CPU mất ~5 phút cho ảnh 6000×4500.
 - `veg_blur_boost` / `veg_blur_fraction` (mặc định **tắt**): lượt phụ denoise cao cho vùng cây mờ nhất, chỉ ở phần trong tán. Thử nghiệm cho thấy trộn hai lượt vẽ khác nhau vẫn có thể tạo lá trong suốt → không dùng trong preset.
@@ -16,7 +16,8 @@
 - Colab A100 80 GB, `vram_mode` = `high (32GB)` (giả lập RTX 5090): batch 2, VAE không chia ô, chạy hết không lỗi.
 
 ### ⏳ Chưa làm / chưa kiểm chứng
-- Dải sáng trung bình (L 60–70) còn lệch nhẹ (~0.8 ΔE) — dưới ngưỡng nhìn thấy thường gặp (~1–2).
+- Cây nền mờ (DOF có sẵn trong ảnh render) chưa nét lên rõ ở preset này; muốn nét hơn phải tăng veg_denoise ≥ 0.55 (vẽ lại lá nhiều hơn).
+- Dải sáng trung bình (L 60–70) còn lệch nhẹ (~1 ΔE) — quanh ngưỡng nhìn thấy (~1–2).
 - Flux vẫn vẽ lá khác vị trí so với ảnh gốc (bản chất của upscale sinh chi tiết).
 - Chưa chạy thật trên RTX 5070 Ti / 5090.
 

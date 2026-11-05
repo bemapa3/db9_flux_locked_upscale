@@ -19,7 +19,8 @@ Cập nhật: 2026-11-06 02:20 (Asia/Saigon)
 ## Đã xử lý (v4.4)
 - Lá "ghost"/quầng trời ở mép tán: cân tần số thấp lượt cây về lượt chính + nới mask chỉ vào trời.
 - Ám xanh lá vùng tối: tone_match theo dải sáng (đo ở ~2k).
-- Cây nền nét hơn: veg_denoise 0.48.
+- veg_denoise 0.48: ảnh cắt nét hơn 7 %, ảnh 6k đầy đủ không đổi rõ → cây nền mờ CHƯA xử lý xong.
+- Đo màu 6k (ΔE dải sáng trung bình/tối đa): v4.3 0.52/1.16 → v4.4.0 0.46/1.01.
 - Color Restore chạy GPU (6k: 5 phút → vài giây). Render 6k trên A100: ~14 phút.
 
 ## Đã thử và loại
@@ -36,6 +37,8 @@ Cập nhật: 2026-11-06 02:20 (Asia/Saigon)
 - Dán lệnh dài vào terminal Colab: gõ phím bị cắt ~2000 ký tự; dùng sự kiện paste qua JS.
 
 ## Ý tưởng tiếp theo
+- Cây nền mờ: thử veg_denoise 0.55–0.6 riêng cho vùng cây (chấp nhận vẽ lại lá) hoặc hỏi chủ có muốn giữ DOF.
+- Không thêm node/model nào vào `Custom_Model_List.txt` / `Custom_ComfyNode.txt` (ColorMatch thử không đạt).
 - Chế độ "realism" kiểu MIR (chủ hỏi https://www.mir.no/work): cây cỏ denoise 0.55–0.65, công trình 0.30–0.35,
   khoá màu nhẹ hơn. Cần chủ gửi ảnh và mức "được phép vẽ lại".
 - Test thật trên RTX 5070 Ti (fp8) và 5090.
