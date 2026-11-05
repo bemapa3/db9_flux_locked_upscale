@@ -1,5 +1,21 @@
 # Changelog
 
+## v4.3.0 — 2026-11-05
+### ✅ Đã làm
+- **Exact Color Restore v2** (sửa viền vàng/xanh quanh lá trên nền trời và lá bị "bóng ma"): chỉ chỉnh màu/độ sáng ở tần số thấp (mặc định `luma_radius` 32, `chroma_radius` 24), trường hiệu chỉnh được lọc bằng guided filter theo ảnh mới (`edge_aware`, mặc định bật) nên bám theo mép lá mới. Kiểm chứng bằng mắt trên vùng cây/trời: hết quầng vàng.
+- **Mask cây cỏ v2**: nhận cả lá trong bóng râm (ngưỡng bão hoà theo độ sáng), lấp lỗ và nới mép, chuyển tiếp hẹp. Vùng trộn nửa vời (mask 0.1–0.9) giảm từ 11.8% → 2.4% diện tích ảnh test → hết hiện tượng "chồng hai lớp" ở tán cây.
+- `veg_include_flowers` (mặc định tắt): nhận thêm hoa trắng/hồng (sáng, ít bão hoà, có texture, không phải cạnh thẳng kiến trúc; loại cát bằng tỉ lệ xanh dương/xanh lá). Ảnh test: bụi hoa trái 0.97, mặt tiền 0.00, trời 0.00, lòng cát 0.09.
+- `texture_limit` (mặc định 0 = tắt, khuyên 1.25): vùng công trình không được có năng lượng chi tiết lớn hơn N lần ảnh base tại chỗ → giảm hoa văn bịa (vân rạn trên tường, vết nứt trên cát).
+- **Tối ưu VRAM**: `vram_mode` (auto/low/medium/high/xhigh/ultra) + `tile_batch`. Auto đọc VRAM GPU, giới hạn kích thước tile, đo bộ nhớ thực tế của tile đầu rồi chọn batch; GPU ≤ 24 GB dùng VAE chia ô; gặp OOM tự giảm batch rồi bật VAE chia ô. Đường xử lý mới dùng khi không cắm ControlNet (có ControlNet thì chạy đường cũ).
+- Kiểm chứng trên Colab RTX PRO 6000 (95 GB): mode=ultra, ~1.34 GB/tile, batch=6, 6000×4500 trong 503 s. Mode `low` (giả lập 16 GB): tile 1024, VAE chia ô, batch 1, chạy hết không lỗi.
+
+### ⏳ Chưa làm / chưa kiểm chứng
+- Chưa chạy thật trên RTX 5070 Ti (16 GB) và 5090 (32 GB). Lưu ý: Flux2-klein-9b bản bf16 nặng ~17 GB, trên 16 GB nên dùng bản fp8.
+- Gộp batch không làm nhanh hơn trên RTX PRO 6000 (GPU đã chạy hết công suất với 1 tile 1536); lợi ích chính của `vram_mode` là tránh tràn VRAM trên card nhỏ.
+- Tường xám vẫn còn vân rạn nhẹ (đã giảm so với v4.2); có thể do chính ảnh base Nomos8kSC làm nổi vân. Hướng tiếp theo: so `texture_limit` với ảnh gốc phóng bicubic thay vì ảnh base.
+- Lượt cây cỏ vẫn có thể vẽ thêm vài chi tiết nhỏ (đốm hoa trong cỏ).
+
+
 ## v4.2.0 — 2026-11-05
 ### ✅ Đã làm
 - **Sửa lỗi `upscale_model` không chạy** trên ComfyUI ≥ 0.3x: `ImageUpscaleWithModel` đã chuyển sang `comfy_extras.nodes_upscale_model` (node V3), code cũ không tìm thấy nên âm thầm phóng base bằng bicubic. Nay gọi đúng API mới (giữ đường cũ làm dự phòng). Kiểm chứng trên ComfyUI 0.44: log `Base upscale with model OK -> (1, 6000, 8000, 3)`.

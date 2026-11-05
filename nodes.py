@@ -1,6 +1,10 @@
 """
 db9_flux_locked_upscale / nodes.py
-v4.2.0 — 2026-11-05 (see CHANGELOG.md)
+v4.3.0 — 2026-11-05 (see CHANGELOG.md)
+  - Exact Color Restore v2: low-frequency, edge-aware (no halos / ghost leaves)
+  - vegetation mask v2 (shadow foliage, flowers, steep edge), texture_limit
+  - vram_mode / tile_batch: VRAM-aware tile size, batching, tiled VAE, OOM fallback
+v4.2.0 — 2026-11-05
   - upscale_model works on ComfyUI >= 0.3x (comfy_extras V3 ImageUpscaleWithModel)
   - vegetation pass (veg_denoise / positive_veg) + arch_detail_lock
   - new node DB9ExactColorRestore (Lab colour lock to the original)
@@ -164,6 +168,304 @@ def _seam_mask(y, x, y_positions, x_positions, tile_h, tile_w, out_h, out_w, fea
     wy = _seam_axis(y_positions, y_positions.index(y), tile_h, out_h, feather)
     wx = _seam_axis(x_positions, x_positions.index(x), tile_w, out_w, feather)
     return (wy[:, None] * wx[None, :])[None, None].clamp_min(1e-6)
+
+
+# ---------------------------------------------------------------------------
+# v4.3 helpers: VRAM plan, batched sampling, vegetation mask v2, texture limit
+# ---------------------------------------------------------------------------
+_VRAM_MODES = ["auto", "low (<=16GB)", "medium (24GB)", "high (32GB)", "xhigh (40-48GB)", "ultra (80GB+)"]
+_VRAM_TABLE = {
+    #            max tile, batch cap, tiled VAE
+    "low":    dict(max_tile=1024, cap=1, tiled=True),
+    "medium": dict(max_tile=1280, cap=1, tiled=True),
+    "high":   dict(max_tile=1536, cap=2, tiled=False),
+    "xhigh":  dict(max_tile=1536, cap=3, tiled=False),
+    "ultra":  dict(max_tile=1536, cap=6, tiled=False),
+}
+
+
+def _gpu_total_gb():
+    try:
+        import comfy.model_management as _mm
+        return float(_mm.get_total_memory(_mm.get_torch_device())) / 1024 ** 3
+    except Exception:
+        pass
+    try:
+        if torch.cuda.is_available():
+            return float(torch.cuda.get_device_properties(0).total_memory) / 1024 ** 3
+    except Exception:
+        pass
+    return 0.0
+
+
+def _db9_vram_plan(vram_mode, tile_batch, tile_w, tile_h):
+    total = _gpu_total_gb()
+    key = str(vram_mode or "auto").split(" ")[0]
+    if key not in _VRAM_TABLE:
+        if total <= 0:
+            key = "low"
+        elif total <= 17:
+            key = "low"
+        elif total <= 26:
+            key = "medium"
+        elif total <= 34:
+            key = "high"
+        elif total <= 50:
+            key = "xhigh"
+        else:
+            key = "ultra"
+    cfg = dict(_VRAM_TABLE[key])
+    cfg["mode"] = key
+    cfg["total_gb"] = total
+    cfg["fixed_batch"] = int(tile_batch) if tile_batch and int(tile_batch) > 0 else 0
+    tw, th = int(tile_w), int(tile_h)
+    if tw > cfg["max_tile"] or th > cfg["max_tile"]:
+        print(f"[DB9] VRAM plan: tile {tw}x{th} too large for mode={key}, using {cfg['max_tile']}")
+        tw, th = min(tw, cfg["max_tile"]), min(th, cfg["max_tile"])
+    cfg["tile_w"], cfg["tile_h"] = tw, th
+    print(f"[DB9] VRAM plan: GPU {total:.1f} GB -> mode={key}, batch cap={cfg['cap']}, "
+          f"tiled VAE={cfg['tiled']}, tile={tw}x{th}"
+          + (f", fixed batch={cfg['fixed_batch']}" if cfg["fixed_batch"] else ""))
+    return cfg
+
+
+def _is_oom(e):
+    oom_cls = getattr(torch.cuda, "OutOfMemoryError", None)
+    if oom_cls is not None and isinstance(e, oom_cls):
+        return True
+    return "out of memory" in str(e).lower()
+
+
+def _soft_empty():
+    try:
+        import comfy.model_management as _mm
+        _mm.soft_empty_cache()
+    except Exception:
+        pass
+
+
+def _vae_encode(vae, img_bhwc, tiled):
+    if tiled and hasattr(vae, "encode_tiled"):
+        try:
+            return {"samples": vae.encode_tiled(img_bhwc[:, :, :, :3], tile_x=512, tile_y=512, overlap=64)}
+        except Exception as e:
+            print(f"[DB9] tiled VAE encode failed ({e}), using full encode")
+    return comfy_nodes.VAEEncode().encode(vae, img_bhwc)[0]
+
+
+def _vae_decode(vae, latent, tiled):
+    if tiled and hasattr(vae, "decode_tiled"):
+        try:
+            comp = 8
+            try:
+                comp = int(vae.spacial_compression_decode())
+            except Exception:
+                pass
+            imgs = vae.decode_tiled(latent["samples"], tile_x=max(8, 512 // comp),
+                                    tile_y=max(8, 512 // comp), overlap=max(2, 64 // comp))
+            if imgs.ndim == 5:
+                imgs = imgs.reshape(-1, imgs.shape[-3], imgs.shape[-2], imgs.shape[-1])
+            return imgs
+        except Exception as e:
+            print(f"[DB9] tiled VAE decode failed ({e}), using full decode")
+    return comfy_nodes.VAEDecode().decode(vae, latent)[0]
+
+
+def _sample_batch(model, pos, neg, vae, imgs_bhwc, seed, steps, cfg, sampler, sched, denoise, tiled):
+    """Encode -> KSample -> Decode a batch of equally sized tiles. Returns BHWC on CPU."""
+    lat = _vae_encode(vae, imgs_bhwc, tiled)
+    sampled = comfy_nodes.KSampler().sample(model, seed, steps, cfg, sampler, sched, pos, neg, lat, denoise)[0]
+    return _vae_decode(vae, sampled, tiled).float().cpu()
+
+
+def _box(x, r):
+    if r <= 0:
+        return x
+    k = 2 * int(r) + 1
+    return F.avg_pool2d(x, k, stride=1, padding=k // 2, count_include_pad=False)
+
+
+def _guided_filter(I, p, r, eps):
+    """Edge-preserving smoothing of p (B,C,H,W) guided by I (B,1,H,W)."""
+    mI = _box(I, r)
+    mp = _box(p, r)
+    cov = _box(I * p, r) - mI * mp
+    var = _box(I * I, r) - mI * mI
+    a = cov / (var + eps)
+    b = mp - a * mI
+    return _box(a, r) * I + _box(b, r)
+
+
+def _vegetation_mask_v2(img, threshold=0.05, blur=8, include_flowers=False):
+    """Vegetation mask v2 (B,1,H,W): shadow-aware green, optional flowers, hole filling, steep edge."""
+    r, g, b = img[:, 0:1], img[:, 1:2], img[:, 2:3]
+    ssum = (r + g + b).clamp_min(1e-4)
+    lum = ssum / 3.0
+    exg = (2.0 * g - r - b) / ssum
+    mx = torch.max(torch.max(r, g), b)
+    mn = torch.min(torch.min(r, g), b)
+    sat = (mx - mn) / mx.clamp_min(1e-4)
+    sat_thr = 0.04 + 0.08 * lum.clamp(0, 1)          # shadow foliage has low saturation
+    m = ((exg - threshold) / 0.08).clamp(0, 1) * ((sat - sat_thr) / 0.06).clamp(0, 1)
+    if include_flowers:
+        mu = _box(lum, 2)
+        tex = (_box(lum * lum, 2) - mu * mu).clamp_min(0).sqrt()
+        tex = _box(tex, 4)
+        gy = lum[:, :, 2:, 1:-1] - lum[:, :, :-2, 1:-1]
+        gx = lum[:, :, 1:-1, 2:] - lum[:, :, 1:-1, :-2]
+        gx = F.pad(gx, (1, 1, 1, 1), mode="replicate")
+        gy = F.pad(gy, (1, 1, 1, 1), mode="replicate")
+        jxx, jyy, jxy = _box(gx * gx, 6), _box(gy * gy, 6), _box(gx * gy, 6)
+        coh = ((jxx - jyy) ** 2 + 4 * jxy ** 2).sqrt() / (jxx + jyy + 1e-6)   # 1 = straight edges
+        white = ((lum - 0.55) / 0.1).clamp(0, 1) * ((0.22 - sat) / 0.06).clamp(0, 1) * ((b / g.clamp_min(1e-4) - 0.86) / 0.04).clamp(0, 1)
+        pink = ((r - g) / 0.04).clamp(0, 1) * ((b - g * 0.9) / 0.04).clamp(0, 1) * ((sat - 0.08) / 0.05).clamp(0, 1)
+        flowers = torch.max(white, pink) * ((tex - 0.025) / 0.025).clamp(0, 1) * ((0.75 - coh) / 0.20).clamp(0, 1)
+        m = torch.max(m, flowers)
+    # hole filling + slight dilation on a 4x smaller grid (fast), then steep narrow transition
+    H, W = m.shape[2:]
+    sm = F.avg_pool2d(m, 4, 4, ceil_mode=True)
+    sm = F.max_pool2d(sm, 7, 1, 3)                    # dilate 12 px
+    sm = -F.max_pool2d(-sm, 5, 1, 2)                  # erode 8 px  (closing + ~4 px growth)
+    sm = _box(sm, 1)
+    m = F.interpolate(sm, size=(H, W), mode="bilinear", align_corners=False)
+    m = ((m - 0.35) / 0.30).clamp(0, 1)
+    if blur > 0:
+        m = _box(m, max(1, int(blur) // 2))
+    return m.clamp(0, 1)
+
+
+def _texture_limit(out, base, limit, radius=2, energy_radius=6):
+    """Cap high-frequency energy of `out` at `limit` x that of `base` (locally)."""
+    if limit is None or limit <= 0:
+        return out
+    lf = _box(_box(out, radius), radius)
+    hf = out - lf
+    hb = base - _box(_box(base, radius), radius)
+    eo = _box(hf.abs().mean(1, keepdim=True), energy_radius)
+    eb = _box(hb.abs().mean(1, keepdim=True), energy_radius)
+    gain = ((limit * eb + 1e-4) / (eo + 1e-4)).clamp(max=1.0)
+    return (lf + hf * gain).clamp(0.0, 1.0)
+
+
+def _db9_tiles_v43(base_cpu, model, vae, positive, negative, positive_veg,
+                   out_h, out_w, y_positions, x_positions, tile_h, tile_w, feather,
+                   seed, steps, cfg, sampler_name, scheduler, denoise,
+                   veg_denoise, veg_mask_threshold, veg_mask_blur, veg_include_flowers,
+                   arch_detail_lock, texture_limit, color_lock_strength, contrast_lock_strength,
+                   structure_full, sg_strength, plan):
+    """v4.3 tile loop: batched sampling with adaptive batch size and OOM fallback (no ControlNet)."""
+    import time as _time
+    cpu = torch.device("cpu")
+    tiles = []
+    for y in y_positions:
+        for x in x_positions:
+            y2, x2 = min(out_h, y + tile_h), min(out_w, x + tile_w)
+            tiles.append((y, x, y2, x2))
+    total = len(tiles)
+    pbar = None
+    if _comfy_utils is not None:
+        try:
+            pbar = _comfy_utils.ProgressBar(total)
+        except Exception:
+            pass
+    acc = torch.zeros((1, 3, out_h, out_w), dtype=torch.float32)
+    wts = torch.zeros((1, 1, out_h, out_w), dtype=torch.float32)
+    tiled = bool(plan["tiled"])
+    batch = plan["fixed_batch"] or 1
+    measured = bool(plan["fixed_batch"])
+    cuda = torch.cuda.is_available()
+    t0 = _time.time()
+
+    def run(imgs, pos, neg, sd, dn):
+        nonlocal batch, tiled
+        n = imgs.shape[0]
+        while True:
+            try:
+                if batch >= n:
+                    return _sample_batch(model, _clone_conditioning(pos), _clone_conditioning(neg), vae,
+                                         imgs, sd, steps, cfg, sampler_name, scheduler, dn, tiled)
+                parts = []
+                for i in range(0, n, batch):
+                    parts.append(_sample_batch(model, _clone_conditioning(pos), _clone_conditioning(neg), vae,
+                                               imgs[i:i + batch], sd + i, steps, cfg, sampler_name, scheduler, dn, tiled))
+                return torch.cat(parts, 0)
+            except Exception as e:
+                if not _is_oom(e):
+                    raise
+                _soft_empty()
+                if batch > 1:
+                    batch = max(1, batch // 2)
+                    print(f"[DB9] OOM -> batch reduced to {batch}")
+                elif not tiled:
+                    tiled = True
+                    print("[DB9] OOM -> switching to tiled VAE")
+                else:
+                    raise
+
+    i = 0
+    while i < total:
+        n = 1 if not measured else batch
+        chunk = tiles[i:i + n]
+        shapes = {(t[2] - t[0], t[3] - t[1]) for t in chunk}
+        if len(shapes) > 1:                      # only batch equally sized tiles
+            chunk = chunk[:1]
+        th, tw = chunk[0][2] - chunk[0][0], chunk[0][3] - chunk[0][1]
+        refs = [base_cpu[:, :, y:y2, x:x2].clone() for (y, x, y2, x2) in chunk]
+        imgs = torch.cat([_nchw_to_bhwc(r) for r in refs], 0)
+        if cuda and not measured:
+            torch.cuda.synchronize()
+            torch.cuda.reset_peak_memory_stats()
+        arch = run(imgs, positive, negative, int(seed) + i, denoise)
+        if cuda and not measured:
+            torch.cuda.synchronize()
+            peak = torch.cuda.max_memory_allocated()
+            now = torch.cuda.memory_allocated()
+            free, _tot = torch.cuda.mem_get_info()
+            per_tile = max(peak - now, 256 * 1024 ** 2)
+            est = int((free * 0.80) // per_tile)
+            batch = max(1, min(plan["cap"], est))
+            measured = True
+            print(f"[DB9] VRAM measured: ~{per_tile / 1024 ** 3:.2f} GB per tile, free {free / 1024 ** 3:.1f} GB "
+                  f"-> batch={batch}")
+        vegs = [None] * len(chunk)
+        if veg_denoise > 0:
+            masks = [_vegetation_mask_v2(r, veg_mask_threshold, veg_mask_blur, veg_include_flowers) for r in refs]
+            idx = [k for k, mk in enumerate(masks) if float(mk.mean()) >= 0.01]
+            if idx:
+                vimgs = torch.cat([imgs[k:k + 1] for k in idx], 0)
+                vout = run(vimgs, positive_veg if positive_veg is not None else positive, negative,
+                           int(seed) + i, veg_denoise)
+                for j, k in enumerate(idx):
+                    vegs[k] = (_bhwc_to_nchw(vout[j:j + 1]), masks[k])
+        for k, (y, x, y2, x2) in enumerate(chunk):
+            ref = refs[k]
+            sn = _bhwc_to_nchw(arch[k:k + 1]).to(cpu)
+            if sn.shape[2:] != (th, tw):
+                sn = _resize_nchw(sn, (th, tw), "bicubic")
+            if arch_detail_lock > 0:
+                sn = _frequency_structure_lock(sn, ref, arch_detail_lock, blur_radius=3)
+            if texture_limit and texture_limit > 0:
+                sn = _texture_limit(sn, ref, texture_limit)
+            vtag = ""
+            if vegs[k] is not None:
+                vn, vm = vegs[k]
+                if vn.shape[2:] != (th, tw):
+                    vn = _resize_nchw(vn, (th, tw), "bicubic")
+                sn = sn * (1.0 - vm) + vn * vm
+                vtag = f" veg={float(vm.mean()) * 100:.0f}%"
+            if color_lock_strength > 0 or contrast_lock_strength > 0:
+                sn = _detail_preserving_color_lock(sn, ref, color_lock_strength, contrast_lock_strength, blur_radius=7)
+            if structure_full is not None and sg_strength > 0:
+                sn = _frequency_structure_lock(sn, structure_full[:, :, y:y2, x:x2], sg_strength, blur_radius=5)
+            msk = _seam_mask(y, x, y_positions, x_positions, tile_h, tile_w, out_h, out_w, feather)
+            acc[:, :, y:y2, x:x2] += sn * msk
+            wts[:, :, y:y2, x:x2] += msk
+            if pbar is not None:
+                pbar.update(1)
+            print(f"[DB9] Tile {i + k + 1}/{total}  y={y}:{y2}  x={x}:{x2}{vtag}  done")
+        i += len(chunk)
+    print(f"[DB9] v4.3 tiles done in {_time.time() - t0:.1f}s (batch={batch}, tiled VAE={tiled})")
+    return acc / wts.clamp_min(1e-5)
 
 def _cosine_mask(h: int, w: int, feather: int, device, dtype) -> torch.Tensor:
     """
@@ -952,6 +1254,11 @@ class DB9FluxLockedControlNetUpscale:
                 "veg_mask_blur": ("INT", {"default": 24, "min": 0, "max": 128, "step": 1}),
                 "arch_detail_lock": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "positive_veg": ("CONDITIONING",),
+                # --- v4.3 ---
+                "veg_include_flowers": ("BOOLEAN", {"default": False}),
+                "texture_limit": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 4.0, "step": 0.05}),
+                "vram_mode": (_VRAM_MODES, {"default": "auto"}),
+                "tile_batch": ("INT", {"default": 0, "min": 0, "max": 16, "step": 1}),
             },
         }
 
@@ -972,6 +1279,7 @@ class DB9FluxLockedControlNetUpscale:
         structure_guide_image=None, structure_guide_strength=0.5,
         veg_denoise=0.0, veg_mask_threshold=0.05, veg_mask_blur=24,
         arch_detail_lock=0.0, positive_veg=None,
+        veg_include_flowers=False, texture_limit=0.0, vram_mode="auto", tile_batch=0,
     ):
         src = _bhwc_to_nchw(image)
         b, c, h, w = src.shape
@@ -1028,6 +1336,10 @@ class DB9FluxLockedControlNetUpscale:
                 )
                 print(f"[DB9] Structure guide active (effective_strength={_effective_sg_strength:.2f})")
 
+        # -- v4.3: VRAM plan (may shrink tiles on small GPUs) --
+        _plan = _db9_vram_plan(vram_mode, tile_batch, tile_width, tile_height)
+        tile_width, tile_height = _plan["tile_w"], _plan["tile_h"]
+
         # -- Step 2: tile positions --
         y_positions = _make_positions(out_h, tile_height, overlap)
         x_positions = _make_positions(out_w, tile_width, overlap)
@@ -1038,6 +1350,22 @@ class DB9FluxLockedControlNetUpscale:
             f"{total_tiles} tiles ({len(y_positions)}r x {len(x_positions)}c) | "
             f"steps={steps} denoise={denoise}"
         )
+
+        # -- v4.3: batched path (no ControlNet, single image) --
+        if control_net is None and b == 1 and comfy_nodes is not None:
+            out = _db9_tiles_v43(
+                base_cpu, model, vae, positive, negative, positive_veg,
+                out_h, out_w, y_positions, x_positions, tile_height, tile_width, feather,
+                seed, steps, cfg, sampler_name, scheduler, denoise,
+                veg_denoise, veg_mask_threshold, veg_mask_blur, veg_include_flowers,
+                arch_detail_lock, texture_limit, color_lock_strength, contrast_lock_strength,
+                structure_full, _effective_sg_strength, _plan,
+            )
+            if sharpen_strength > 0:
+                out = _unsharp_mask(out, strength=sharpen_strength, radius=3)
+                print(f"[DB9] Applied unsharp mask (strength={sharpen_strength:.2f})")
+            print("[DB9] Upscale complete.")
+            return (_nchw_to_bhwc(out), _nchw_to_bhwc(base_cpu))
 
         # Progress bar (shows in ComfyUI UI)
         pbar = None
@@ -1234,18 +1562,24 @@ def _soft_blur(x, radius):
     return F.avg_pool2d(x, k, stride=1, padding=k // 2, count_include_pad=False)
 
 
-def _exact_color_restore(src, ref, luma_radius=16, chroma_radius=4, luma_strength=1.0, chroma_strength=1.0):
-    """src/ref: NCHW sRGB, same size. Replace LF luminance + chroma of src by ref, keep HF of src."""
+def _exact_color_restore(src, ref, luma_radius=32, chroma_radius=24, luma_strength=1.0, chroma_strength=1.0,
+                         edge_aware=True):
+    """v4.3: correct only LOW-frequency luminance/chroma towards ref. The correction field is
+    guided-filtered with the new image's luminance so it follows the NEW edges -> no halos/ghosts."""
     ls = _srgb_to_lab(src)
     lr = _srgb_to_lab(ref)
-    L, Lr = ls[:, 0:1], lr[:, 0:1]
-    ab, abr = ls[:, 1:3], lr[:, 1:3]
-    if luma_strength > 0:
-        L_new = L - _soft_blur(L, luma_radius) + _soft_blur(Lr, luma_radius)
-        L = torch.lerp(L, L_new, luma_strength)
-    if chroma_strength > 0:
-        ab_new = ab - _soft_blur(ab, chroma_radius) + _soft_blur(abr, chroma_radius)
-        ab = torch.lerp(ab, ab_new, chroma_strength)
+    L, ab = ls[:, 0:1], ls[:, 1:3]
+    guide = L / 100.0
+    if luma_strength > 0 and luma_radius > 0:
+        dL = _soft_blur(lr[:, 0:1], luma_radius) - _soft_blur(L, luma_radius)
+        if edge_aware:
+            dL = _guided_filter(guide, dL, max(4, luma_radius // 2), 1e-3)
+        L = L + luma_strength * dL
+    if chroma_strength > 0 and chroma_radius > 0:
+        dab = _soft_blur(lr[:, 1:3], chroma_radius) - _soft_blur(ab, chroma_radius)
+        if edge_aware:
+            dab = _guided_filter(guide, dab, max(4, chroma_radius // 2), 1e-3)
+        ab = ab + chroma_strength * dab
     return _lab_to_srgb(torch.cat([L, ab], 1))
 
 
@@ -1262,10 +1596,11 @@ class DB9ExactColorRestore:
             "required": {
                 "image": ("IMAGE",),
                 "reference": ("IMAGE",),
-                "luma_radius": ("INT", {"default": 16, "min": 0, "max": 256, "step": 1}),
-                "chroma_radius": ("INT", {"default": 4, "min": 0, "max": 128, "step": 1}),
+                "luma_radius": ("INT", {"default": 32, "min": 0, "max": 256, "step": 1}),
+                "chroma_radius": ("INT", {"default": 24, "min": 0, "max": 128, "step": 1}),
                 "luma_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "chroma_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "edge_aware": ("BOOLEAN", {"default": True}),
             }
         }
 
@@ -1274,7 +1609,8 @@ class DB9ExactColorRestore:
     FUNCTION = "restore"
     CATEGORY = "DB9/Flux Locked Upscale"
 
-    def restore(self, image, reference, luma_radius, chroma_radius, luma_strength, chroma_strength):
+    def restore(self, image, reference, luma_radius, chroma_radius, luma_strength, chroma_strength,
+                edge_aware=True):
         src = _bhwc_to_nchw(image).cpu()
         ref = _bhwc_to_nchw(reference).cpu()
         if ref.shape[0] != src.shape[0]:
@@ -1284,7 +1620,8 @@ class DB9ExactColorRestore:
         outs = []
         for i in range(src.shape[0]):
             outs.append(_exact_color_restore(
-                src[i:i + 1], ref[i:i + 1], luma_radius, chroma_radius, luma_strength, chroma_strength))
+                src[i:i + 1], ref[i:i + 1], luma_radius, chroma_radius, luma_strength, chroma_strength,
+                edge_aware))
         print(f"[DB9] Exact color restore: luma_r={luma_radius} chroma_r={chroma_radius} "
               f"strength=({luma_strength:.2f},{chroma_strength:.2f})")
         return (_nchw_to_bhwc(torch.cat(outs, 0)),)
