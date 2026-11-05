@@ -326,6 +326,9 @@ def _vegetation_mask_v2(img, threshold=0.05, blur=8, include_flowers=False):
     sm = F.avg_pool2d(m, 4, 4, ceil_mode=True)
     sm = F.max_pool2d(sm, 7, 1, 3)                    # dilate 12 px
     sm = -F.max_pool2d(-sm, 5, 1, 2)                  # erode 8 px  (closing + ~4 px growth)
+    # v4.4c: grow the mask ~24 px into the surroundings (sky etc.) so thin leaves at the canopy
+    # edge come from ONE pass only; the blend band then falls on smooth sky -> no ghost leaves
+    sm = F.max_pool2d(sm, 13, 1, 6)
     sm = _box(sm, 1)
     m = F.interpolate(sm, size=(H, W), mode="bilinear", align_corners=False)
     m = ((m - 0.35) / 0.30).clamp(0, 1)
