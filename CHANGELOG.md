@@ -2,16 +2,21 @@
 
 ## v4.4.0 — 2026-11-06
 ### ✅ Đã làm
-- **Cây nền nhoè** — `veg_blur_boost` / `veg_blur_fraction` (mặc định tắt; preset 0.10 / 0.35): tìm 35 % vùng cây kém nét nhất trong ảnh base, chạy thêm một lượt với denoise `veg_denoise + veg_blur_boost` (0.42 → 0.52) và trộn theo mask mềm. Ảnh test: 15–22 % ảnh được tăng nét; vùng cây nền góc trái (chủ khoanh) nét hơn v4.3 khi so crop 100 %.
-- **Hết quầng sáng / "ghost" ở mép tán cây trên nền trời** — trước khi trộn, tần số thấp (~24 px: tông trời, bóng đổ) của lượt cây được cân về đúng lượt chính, chỉ giữ chi tiết lá; mask cây được nới ~28 px **chỉ vào vùng trời** (sáng, ngả xanh dương, phẳng) để lá mảnh ở mép tán lấy trọn từ một lượt. So crop 100 % (vùng chủ khoanh đỏ): hết mảng trời sáng quanh tán, lá mờ bán trong suốt giảm rõ; góc mái/tường không bị ảnh hưởng.
-- **Khớp tông màu theo dải sáng** — `tone_match` (mặc định 1.0) trong DB9 Exact Color Restore: so trung bình a/b từng dải độ sáng (tối → sáng) giữa ảnh mới và ảnh gốc, đo ở ~2k để độ nét khác nhau không làm lệch thống kê. Ảnh test: bóng tối sâu nhất lệch xanh lá a −1.0 → −0.5, vùng sáng giữ ≈ 0 (bản thử đầu đo ở 6k làm vùng sáng ngả xanh dương −1.4 b — đã sửa).
-- Thử và **bỏ**: nới mask cây 24 px ra mọi hướng (v4.4c) → tạo mảng vuông sáng trên trời và vẽ bẩn lên góc mái be.
-- Colab: chạy được trên A100 80 GB với `vram_mode` = `high (32GB)` (giả lập RTX 5090): batch 2, VAE không chia ô, 6000×4500 ≈ 20–27 phút (A100 chậm hơn RTX PRO 6000 ~2.5 lần).
+- **Hết quầng sáng / lá "ghost" ở mép tán cây trên nền trời** (vùng chủ khoanh đỏ):
+  - tần số thấp (~24 px: tông trời, bóng đổ) của lượt cây được cân về đúng lượt chính trước khi trộn, chỉ giữ chi tiết lá → hết mảng trời sáng quanh tán;
+  - mask cây nới ~28 px **chỉ vào vùng trời** (sáng, ngả xanh dương, phẳng) → lá mảnh ở mép tán lấy trọn từ một lượt, không còn lá bán trong suốt. Tường/mái không bị lan vào (kiểm tra góc mái be).
+  - Kiểm chứng: so crop 100 % ảnh thô (trước Color Restore) — lá mờ sinh ra trong bước upscale, không phải do khoá màu.
+- **Cây nền nét hơn**: preset `veg_denoise` 0.42 → 0.48 (một lượt duy nhất). Độ chi tiết vùng cây nền góc trái +7 %, không chồng hình.
+- **Khớp tông màu theo dải sáng** — `tone_match` (mặc định 1.0) trong DB9 Exact Color Restore, đo ở ~2k. Thêm node có sẵn **KJNodes ColorMatch (hm-mvgd-hm)** cuối workflow. Đo lệch a/b theo dải sáng so với ảnh gốc (ΔE trung bình / tối đa): v4.3 0.52 / 1.16 → tone_match 0.45 / 1.09 → tone_match + ColorMatch 0.42 / 0.82. Bóng tối sâu nhất hết ngả xanh lá (a −1.0 → −0.2).
+- **DB9 Exact Color Restore chạy trên GPU** (tự lùi về CPU khi thiếu VRAM): trước đó lọc trên CPU mất ~5 phút cho ảnh 6000×4500.
+- `veg_blur_boost` / `veg_blur_fraction` (mặc định **tắt**): lượt phụ denoise cao cho vùng cây mờ nhất, chỉ ở phần trong tán. Thử nghiệm cho thấy trộn hai lượt vẽ khác nhau vẫn có thể tạo lá trong suốt → không dùng trong preset.
+- Thử và **bỏ**: nới mask cây 24 px ra mọi hướng (tạo mảng vuông sáng trên trời, vẽ bẩn góc mái).
+- Workflow mới: `workflows/DB9_FluxLockedUpscale_v4.4.0_2026-11-06_api.json`.
+- Colab A100 80 GB, `vram_mode` = `high (32GB)` (giả lập RTX 5090): batch 2, VAE không chia ô, chạy hết không lỗi.
 
 ### ⏳ Chưa làm / chưa kiểm chứng
-- Vẫn còn vài lá mờ nhẹ ở mép tán (do Flux vẽ lá lệch vị trí so với ảnh gốc).
-- Dải sáng trung bình (L 60–70) vẫn lệch nhẹ a +0.7 / b −0.8.
-- `veg_blur_boost` tăng ~30–40 % thời gian ở các tile có cây mờ.
+- Dải sáng trung bình (L 60–70) còn lệch nhẹ (~0.8 ΔE) — dưới ngưỡng nhìn thấy thường gặp (~1–2).
+- Flux vẫn vẽ lá khác vị trí so với ảnh gốc (bản chất của upscale sinh chi tiết).
 - Chưa chạy thật trên RTX 5070 Ti / 5090.
 
 ## v4.3.0 — 2026-11-05

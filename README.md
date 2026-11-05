@@ -31,7 +31,7 @@ All-in-one tiled upscale. Handles: base upscale → tile sampling → color lock
 - `texture_limit` *(optional, v4.3)* — in architecture areas, cap Flux detail energy at N × the base image's local detail (0 = off, 1.25 recommended). Stops invented cracks / mosaic on plain walls and sand.
 - `vram_mode` *(optional, v4.3)* — `auto` (default) reads GPU memory: ≤16 GB → tile 1024 + tiled VAE; 24 GB → tile 1280 + tiled VAE; 32 GB → batch ≤2; 40–48 GB → batch ≤3; 80 GB+ → batch ≤6. Batch is then sized from the measured memory of the first tile; on OOM it halves the batch, then switches to tiled VAE.
 - `tile_batch` *(optional, v4.3)* — force a batch size (0 = automatic).
-- `veg_blur_boost` *(optional, v4.4)* — extra denoise for the blurriest part of the vegetation (soft background trees baked into the render). 0 = off, 0.10 = "a bit sharper". Costs one more sampling pass on tiles that contain such vegetation (~+30–40 % time).
+- `veg_blur_boost` *(optional, v4.4, experimental)* — extra pass with more denoise for the blurriest vegetation interior. 0 = off (recommended): blending two differently drawn passes can leave translucent leaves; raise `veg_denoise` instead.
 - `veg_blur_fraction` *(optional, v4.4)* — share of the vegetation (least sharp first) that gets the boost, default 0.35.
 
 **Outputs:** `image` (upscaled), `base_reference` (pixel-upscaled base for comparison)
@@ -140,10 +140,11 @@ MiDaS model weights are downloaded automatically on first use via `torch.hub`.
 
 ### Tested preset: architecture + landscape, 2k → 6k (v4.4)
 
-v4.3 preset plus `veg_blur_boost` 0.10, `veg_blur_fraction` 0.35 and Exact Color Restore
-`tone_match` 1.0. v4.4 also (no new inputs) matches the low frequencies of the vegetation passes to
-the main pass and grows the vegetation mask into sky only, which removes the bright halos /
-translucent leaves at canopy edges against the sky.
+v4.3 preset with `veg_denoise` **0.48**, `veg_blur_boost` 0, Exact Color Restore `tone_match` 1.0,
+then **ColorMatch** (ComfyUI-KJNodes, method `hm-mvgd-hm`, `image_ref` = original) before Save.
+v4.4 also (no new inputs) matches the low frequencies of the vegetation pass to the main pass and
+grows the vegetation mask into sky only — no more bright halos / translucent leaves at canopy edges.
+Workflow: `workflows/DB9_FluxLockedUpscale_v4.4.0_2026-11-06_api.json`.
 
 ### Preset (v4.3)
 
